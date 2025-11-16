@@ -184,7 +184,7 @@ def create_client_api():
 # ----------- START BOTH SERVERS ------------
 # ============================================
 
-def run_server_api():
+""" def run_server_api():
     uvicorn.run(create_server_api(), host="127.0.0.1", port=9000)
 
 def run_client_api():
@@ -206,4 +206,25 @@ if __name__ == "__main__":
         p2.terminate()
         p1.join()
         p2.join()
-        print("Servers stopped.")
+        print("Servers stopped.") """
+
+import multiprocessing as mp
+
+mp.set_start_method("spawn", force=True)
+
+def run_server_api():
+    app = create_server_api()
+    uvicorn.run(app, host="127.0.0.1", port=9000)
+
+
+def run_client_api():
+    app = create_client_api()
+    uvicorn.run(app, host="127.0.0.1", port=8000)
+
+if __name__ == "__main__":
+    p1 = mp.Process(target=run_server_api)
+    p2 = mp.Process(target=run_client_api)
+    p1.start()
+    p2.start()
+    p1.join()
+    p2.join()
