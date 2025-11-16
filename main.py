@@ -19,9 +19,9 @@ from server.Server import Server
 
 # FL parameters
 FL_ROUNDS = 150
-LOCAL_EPOCHS = 1
+LOCAL_EPOCHS = 4
 NUM_CLIENTS = 20
-NUM_SELECTED_CLIENTS = 2
+NUM_SELECTED_CLIENTS = 10
 SELECTED_MODEL = "VGG"  # "VGG", "NormalCNN"
 SELECTED_PERFORMANCE_OPTIMIZATION_TYPES = [] # ["Quantization", "MixedPrecision", "GradientAccumulation"]
 SELECTED_ALGORITHM = "FedAvg" # FedAvg, (1-JSD), ClientSize(1-JSD), AccuracyBased, AccuracyBased(1-JSD), SEBW, AccuracyBased_SEBW, FedProx, CAFA
