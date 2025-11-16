@@ -1,230 +1,293 @@
+"""
+Corrected federated learning gRPC server+client runner
+- Moves side-effect code out of class bodies
+- Runs server FL loop after gRPC server is started (in background thread)
+- Serializes model state_dict to bytes for sending over gRPC
+- Uses deepcopy for per-client model copies
+- Uses multiprocessing spawn start method to avoid CUDA reinit issues
+- Adds retries/wait for server when clients register
+
+Assumes the generated protobuf modules exist and that message fields for model bytes
+are declared as `bytes` in the proto (e.g. `bytes client_model = 3;`).
+"""
+
+import grpc
+from concurrent import futures
 import multiprocessing
+import threading
+import time
+import io
+import copy
+import sys
+from typing import List
+
+from gRPC import ServergRPC_pb2
+from gRPC import ServergRPC_pb2_grpc
+from gRPC import ClientgRPC_pb2
+from gRPC import ClientgRPC_pb2_grpc
+
 import os
-
-import requests
 import torch
-import uvicorn
-from fastapi import BackgroundTasks, FastAPI
-from pydantic import BaseModel
 
+# Local imports (assumed present)
 from client.Client import Client
 from dataset_partitioner.DatasetPartitioner import DatasetPartitioner
 from models.NormalCNN import NormalCNN
 from models.VGG import VGG
 from server.Server import Server
 
-# ============================================
-# -------- GLOBAL CONFIGURATION --------------
-# ============================================
-
-# FL parameters
+# ----------------- Configuration -----------------
+# gRPC max message sizes (bytes) - increase because model state_dicts can be large
+MAX_MESSAGE_LENGTH = 500 * 1024 * 1024  # 500 MB
 FL_ROUNDS = 150
-LOCAL_EPOCHS = 4
+LOCAL_EPOCHS = 1
 NUM_CLIENTS = 20
-NUM_SELECTED_CLIENTS = 10
-SELECTED_MODEL = "VGG"  # "VGG", "NormalCNN"
-SELECTED_PERFORMANCE_OPTIMIZATION_TYPES = [] # ["Quantization", "MixedPrecision", "GradientAccumulation"]
-SELECTED_ALGORITHM = "FedAvg" # FedAvg, (1-JSD), ClientSize(1-JSD), AccuracyBased, AccuracyBased(1-JSD), SEBW, AccuracyBased_SEBW, FedProx, CAFA
+NUM_SELECTED_CLIENTS = 2
+DATASET_PARTITIONER_MAX_CLASS_PER_CLIENT = 10
+DATASET_PARTITIONER_SEED = 42
+IS_USE_FULL_DATASET = True
+SELECTED_MODEL = "VGG"  # "VGG" or "NormalCNN"
+SELECTED_ALGORITHM = "FedAvg"
+FEDPROX_MU = 0.0
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DATASET_DISTRIBUTION_TYPE = "Realworld_Distribution_C20_1"
 RESULTS_SAVE_PATH = './history'
 RESULTS_DIR = os.path.join(RESULTS_SAVE_PATH, "FL_Results")
+BATCH_SIZE = 64
+SERVER_HOST = 'localhost'
+SERVER_PORT = 50051
+CLIENT_BASE_PORT = 60000
 
-# ============================================
-# --------------- SERVER API -----------------
-# ============================================
+# ----------------- Helpers -----------------
 
-def create_server_api():
-    app = FastAPI()
+def serialize_state_dict(state_dict) -> bytes:
+    buf = io.BytesIO()
+    # save CPU tensors to avoid CUDA device issues during load
+    cpu_state = {k: v.cpu() for k, v in state_dict.items()}
+    torch.save(cpu_state, buf)
+    return buf.getvalue()
 
-    # Initialize Global Model
-    if SELECTED_MODEL == "NormalCNN":
-        global_model = NormalCNN().to(DEVICE)
-    else:
-        global_model = VGG("VGG19").to(DEVICE)
 
-    # Initialize Server
-    server = Server(
-        global_model=global_model,
-        device=DEVICE,
-        model_type=SELECTED_MODEL,
-        fl_rounds=FL_ROUNDS,
-        local_epochs=LOCAL_EPOCHS,
-        num_clients=NUM_CLIENTS,
-        num_selected_clients=NUM_SELECTED_CLIENTS,
-        results_save_dir=RESULTS_DIR,
-        selected_algorithm=SELECTED_ALGORITHM
+def deserialize_state_dict(b: bytes, map_location=None):
+    buf = io.BytesIO(b)
+    return torch.load(buf, map_location=map_location)
+
+# ----------------- Server Servicer -----------------
+class ServerServicer(ServergRPC_pb2_grpc.ServerServiceServicer):
+    def __init__(self):
+        # initialize server object used for FL logic
+        if SELECTED_MODEL == "NormalCNN":
+            global_model = NormalCNN().to(DEVICE)
+        else:
+            global_model = VGG("VGG19").to(DEVICE)
+
+        self.server = Server(
+            global_model=global_model,
+            device=DEVICE,
+            model_type=SELECTED_MODEL,
+            fl_rounds=FL_ROUNDS,
+            local_epochs=LOCAL_EPOCHS,
+            num_clients=NUM_CLIENTS,
+            num_selected_clients=NUM_SELECTED_CLIENTS,
+            results_save_dir=RESULTS_DIR,
+            selected_algorithm=SELECTED_ALGORITHM,
+        )
+
+    def RegisterClient(self, request, context):
+        client_id = request.client_id
+        client_api_url = request.client_api_url
+        print(f"[Server] RegisterClient: id={client_id} url={client_api_url}")
+        try:
+            self.server.register_client(client_id, client_api_url)
+            return ServergRPC_pb2.StatusResponse(status="OK")
+        except Exception as e:
+            print("[Server] Error registering client:", e, file=sys.stderr)
+            return ServergRPC_pb2.StatusResponse(status=f"ERROR: {e}")
+
+# ----------------- Client Servicer -----------------
+class ClientServicer(ClientgRPC_pb2_grpc.ClientServiceServicer):
+    def __init__(self, clients: List[Client]):
+        self.clients = clients
+
+    def ReceiveGlobalModel(self, request, context):
+        client_id = request.client_id
+        model_bytes = request.global_model
+        print(f"[ClientServicer] ReceiveGlobalModel for client {client_id}")
+        try:
+            state_dict = deserialize_state_dict(model_bytes, map_location=self.clients[client_id].device)
+            client_model_params, training_time, iid_measure = self.clients[client_id].start_client_processing(state_dict)
+            client_model_bytes = serialize_state_dict(client_model_params)
+    
+            
+            return ClientgRPC_pb2.ReceiveGlobalModelResponse(client_id=client_id, client_model=client_model_bytes, training_time=training_time, iid_measure=iid_measure)
+        except Exception as e:
+            print("[Client] Error applying global model:", e, file=sys.stderr)
+            raise e
+
+    def ReceiveModelForAccuracyBasedMeasure(self, request, context):
+        client_id = request.client_id
+        model_bytes = request.model
+        try:
+            state_dict = deserialize_state_dict(model_bytes, map_location=self.clients[client_id].device)
+            weighted_val_acc = self.clients[client_id].evaluate_state_dict_on_validation_data(state_dict)
+            return ClientgRPC_pb2.AccuracyBasedMeasureResponse(weighted_val_acc=weighted_val_acc)
+        except Exception as e:
+            print("[Client] Error computing accuracy-based measure:", e, file=sys.stderr)
+            raise e
+
+# ----------------- Server runner -----------------
+
+def server_serve():
+    # create gRPC server with increased message size limits
+    grpc_server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=10),
+        options=[
+            ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
+            ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
+        ]
     )
+    servicer = ServerServicer()
+    ServergRPC_pb2_grpc.add_ServerServiceServicer_to_server(servicer, grpc_server)
+    server_address = f"[::]:{SERVER_PORT}"
+    grpc_server.add_insecure_port(server_address)
+    grpc_server.start()
+    print(f"[Server] gRPC server started on {server_address}")
 
-    class RegisterRequest(BaseModel):
-        client_id: int
-        client_api_url: str
+    def wait_until_clients_register(server, n=NUM_CLIENTS):
+        while len(server.clients["clients_ids"]) < n:
+            print(f"[Server] Waiting for clients... {len(server.clients['clients_ids'])}/{n}")
+            time.sleep(1)
 
-    @app.post("/api/register")
-    def register_client(req: RegisterRequest):
-        if req.client_id in server.clients["clients_ids"]:
-            return {"status": "already registered"}
+    # Run federated learning in a background thread so gRPC can still accept RPCs
+    # Wait for client registrations
+    wait_until_clients_register(servicer.server)
 
-        server.clients["clients_ids"].append(req.client_id)
-        server.clients["client_api_urls"].append(req.client_api_url)
-        return {"status": "registered"}
+    # Start FL loop
+    fl_thread = threading.Thread(target=servicer.server.start_federated_learning, daemon=True)
+    fl_thread.start()
+    print("[Server] Federated learning loop started in background thread")
 
-    @app.post("/api/start-federated-learning")
-    async def start_federated_learning(background_tasks: BackgroundTasks):
-        if len(server.clients["clients_ids"]) == NUM_CLIENTS:
-            background_tasks.add_task(server.start_federated_learning)
-        return {"status": "FL started in background"}
+    try:
+        grpc_server.wait_for_termination()
+    except KeyboardInterrupt:
+        print("[Server] Shutting down...")
+        grpc_server.stop(0)
 
-    return app
+# ----------------- Client runner -----------------
 
-# ============================================
-# --------------- CLIENT API -----------------
-# ============================================
-
-def create_client_api():
-    app = FastAPI()
-
-    # Initialize Global Model
-    if SELECTED_MODEL == "NormalCNN":
-        global_model = NormalCNN().to(DEVICE)
-    else:
-        global_model = VGG("VGG19").to(DEVICE)
-
-    # Create client datasets
+def client_serve(client_start_port=CLIENT_BASE_PORT):
+    # Prepare datasets and client objects (no side-effects in class bodies)
     dataset_partitioner = DatasetPartitioner(
         n_clients=NUM_CLIENTS,
-        batch_size=64,
-        max_class_per_client=10,
-        seed=42,
+        batch_size=BATCH_SIZE,
+        max_class_per_client=DATASET_PARTITIONER_MAX_CLASS_PER_CLIENT,
+        seed=DATASET_PARTITIONER_SEED,
         verbose=True,
     )
     client_datasets, _ = dataset_partitioner.split_cifar10_realworld()
 
-    # Initialize Clients
-    clients = [
-        Client(
+    # create deep copies of the base model for each client
+    if SELECTED_MODEL == "NormalCNN":
+        base_model = NormalCNN()
+    else:
+        base_model = VGG("VGG19")
+
+    clients = []
+    for i in range(NUM_CLIENTS):
+        client_model = copy.deepcopy(base_model)
+        c = Client(
             id=i,
-            ip_address="127.0.0.1",
-            port=8000,
+            ip_address='127.0.0.1',
+            port=client_start_port,
             device=DEVICE,
-            model=global_model,
+            model=client_model,
             client_dataset=client_datasets[i],
-            batch_size=64
-        ) for i in range(NUM_CLIENTS)
-    ]
-
-    class GlobalModelRequest(BaseModel):
-        client_id: int
-        global_model: dict
-        model_type: str
-
-    @app.post("/api/receive/global-model")
-    def receive_global_model(req: GlobalModelRequest):
-        client = clients[req.client_id]
-        print("Receiving global model at Client:", req.client_id)
-        client.set_global_model_to_client(req.global_model)
-        print("Received global model")
-        return {"status": "global model received"}
-
-    class LocalTrainRequest(BaseModel):
-        client_id: int
-        epochs: int
-        selected_algorithm: str
-        is_use_full_dataset: bool
-        model_type: str
-        performance_optimization_types: list
-
-    @app.post("/api/start/local-training")
-    def start_local_training(req: LocalTrainRequest):
-        print("Starting local training...")
-        client = clients[req.client_id]
-        client.train_client_model(
-            epochs=req.epochs,
-            selected_algorithm=req.selected_algorithm,
-            is_use_full_dataset=req.is_use_full_dataset,
-            model_type=req.model_type,
-            performance_optimization_types=req.performance_optimization_types
+            batch_size=BATCH_SIZE,
+            selected_algorithm=SELECTED_ALGORITHM,
+            is_use_full_dataset=IS_USE_FULL_DATASET,
+            model_type=SELECTED_MODEL,
+            local_epochs=LOCAL_EPOCHS,
+            fedprox_mu=FEDPROX_MU,
         )
-        return {"status": "local training started"}
+        clients.append(c)
 
-    class GetTrainedModelRequest(BaseModel):
-        client_id: int
+    # Start client-side gRPC server so server can call back (optional depending on architecture)
+    # create gRPC server with increased message size limits
+    grpc_server = grpc.server(
+        futures.ThreadPoolExecutor(max_workers=10),
+        options=[
+            ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
+            ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
+        ]
+    )
+    servicer = ClientServicer(clients)
+    ClientgRPC_pb2_grpc.add_ClientServiceServicer_to_server(servicer, grpc_server)
+    client_server_port = client_start_port
+    client_address = f"[::]:{client_server_port}"
+    grpc_server.add_insecure_port(client_address)
+    grpc_server.start()
+    print(f"[Client] Client gRPC server started on {client_address}")
 
-    @app.get("/api/send/trained-model")
-    def send_trained_model(req: GetTrainedModelRequest):
-        print("Sending trained model")
-        client = clients[req.client_id]
-        trained_model = client.get_client_model_params()
-        trained_duration = client.local_training_details["train_times"][-1] if client.local_training_details["train_times"] else None
-        return {"trained_model": trained_model, "training_duration": trained_duration}
+    # Register clients with the central server (retry until server available)
+    # create channel to server with increased message size limits
+    server_channel = grpc.insecure_channel(
+        f"{SERVER_HOST}:{SERVER_PORT}",
+        options=[
+            ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
+            ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
+        ]
+    )
+    stub = ServergRPC_pb2_grpc.ServerServiceStub(server_channel)
 
-    # Register all clients with server
-    print("Registering clients...")
     for client in clients:
-        server_register_url = "http://127.0.0.1:9000/api/register"
-        try:
-            r = requests.post(server_register_url, json={
-                "client_id": client.id,
-                "client_api_url": "http://127.0.0.1:8000/api"
-            })
-            r.raise_for_status()
-            print(f"Client {client.id} registered")
-        except Exception as e:
-            print(f"Failed to register client {client.id}: {e}")
+        attempt = 0
+        while True:
+            try:
+                # provide a callback URL or port so the server can reach back if needed
+                client_api_url = f"{client.ip_address}:{client.port}"
+                req = ServergRPC_pb2.ClientRegistrationRequest(client_id=client.id, client_api_url=client_api_url)
+                resp = stub.RegisterClient(req)
+                print(f"[Client] Registered client {client.id} -> {resp.status}")
+                break
+            except Exception as e:
+                attempt += 1
+                if attempt > 20:
+                    print(f"[Client] Failed to register client {client.id} after {attempt} attempts: {e}", file=sys.stderr)
+                    break
+                print(f"[Client] Waiting for server to be ready... (attempt {attempt})")
+                time.sleep(1.0)
 
-    # AUTO START FL
     try:
-        requests.post("http://127.0.0.1:9000/api/start-federated-learning")
-    except:
+        grpc_server.wait_for_termination()
+    except KeyboardInterrupt:
+        print("[Client] Shutting down...")
+        grpc_server.stop(0)
+
+# ----------------- Entrypoint -----------------
+
+def serve():
+    # Use spawn on platforms where CUDA or torch interactions are sensitive
+    try:
+        multiprocessing.set_start_method('spawn')
+    except RuntimeError:
+        # already set
         pass
 
-    return app
+    p_server = multiprocessing.Process(target=server_serve)
+    p_client = multiprocessing.Process(target=client_serve)
 
-# ============================================
-# ----------- START BOTH SERVERS ------------
-# ============================================
-
-""" def run_server_api():
-    uvicorn.run(create_server_api(), host="127.0.0.1", port=9000)
-
-def run_client_api():
-    uvicorn.run(create_client_api(), host="127.0.0.1", port=8000)
-
-if __name__ == "__main__":
-    p1 = multiprocessing.Process(target=run_server_api)
-    p2 = multiprocessing.Process(target=run_client_api)
-
-    p1.start()
-    p2.start()
+    p_server.start()
+    # small sleep to increase chance server is listening before clients attempt registration
+    time.sleep(1.0)
+    p_client.start()
 
     try:
-        p1.join()
-        p2.join()
+        p_server.join()
+        p_client.join()
     except KeyboardInterrupt:
-        print("Stopping servers...")
-        p1.terminate()
-        p2.terminate()
-        p1.join()
-        p2.join()
-        print("Servers stopped.") """
-
-import multiprocessing as mp
-
-mp.set_start_method("spawn", force=True)
-
-def run_server_api():
-    app = create_server_api()
-    uvicorn.run(app, host="127.0.0.1", port=9000)
+        print("[Main] Terminating child processes...")
+        p_server.terminate()
+        p_client.terminate()
 
 
-def run_client_api():
-    app = create_client_api()
-    uvicorn.run(app, host="127.0.0.1", port=8000)
-
-if __name__ == "__main__":
-    p1 = mp.Process(target=run_server_api)
-    p2 = mp.Process(target=run_client_api)
-    p1.start()
-    p2.start()
-    p1.join()
-    p2.join()
+if __name__ == '__main__':
+    serve()

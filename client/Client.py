@@ -16,7 +16,11 @@ torch.backends.cudnn.benchmark = True
 class Client:
     """Federated Learning Client class for local dataset handling, training, and evaluation."""
 
-    def __init__(self, id, ip_address, port, device, model, client_dataset, batch_size):
+    def __init__(
+            self, id, ip_address, port, device, model, client_dataset, batch_size,
+            selected_algorithm, is_use_full_dataset, model_type,
+            local_epochs, fedprox_mu
+    ):
         """
         Initialize the client with dataset splits and dataloaders.
 
@@ -36,8 +40,17 @@ class Client:
             "train_accuracies": [],
             "val_accuracies": [],
             "train_losses": [],
-            "val_losses": []
+            "val_losses": [],
+            "iid_measure_time": None
         }
+        self.client_train_config = {
+            "selected_algorithm": selected_algorithm,
+            "is_use_full_dataset": is_use_full_dataset,
+            "model_type": model_type,
+            "local_epochs": local_epochs,
+            "mu": fedprox_mu
+        }
+        self.iid_measure = None
 
         full_dataset = client_dataset
 
@@ -55,48 +68,41 @@ class Client:
         self.dataset_size = train_size
         self.val_size = val_size
 
-    def serialize_model(self, model):
-        """
-        Convert a PyTorch model's state_dict into a JSON-serializable dictionary.
-        Tensors are converted to CPU NumPy arrays, then to Python lists.
-        """
-        state_dict = model.state_dict()
-        serialized = {
-            k: (v.detach().cpu().numpy().tolist() if isinstance(v, torch.Tensor) else v)
-            for k, v in state_dict.items()
-        }
-        return serialized
-    
-    def deserialize_model(self, serialized_state):
-        """
-        Convert a JSON-serializable model dictionary back into a PyTorch state_dict.
-        Lists → Tensors
-        Scalars → Tensors
-        """
-        deserialized_state = {}
-
-        for k, v in serialized_state.items():
-            # Case 1: list (weights/bias tensors)
-            if isinstance(v, list):
-                deserialized_state[k] = torch.tensor(v)
-
-            # Case 2: scalar numpy values that were converted using .item()
-            elif isinstance(v, (int, float)):
-                deserialized_state[k] = torch.tensor(v)
-
-            # Case 3: fallback (should not happen normally)
-            else:
-                deserialized_state[k] = torch.tensor(v)
-
-        return deserialized_state
-
-    def set_global_model_to_client(self, global_model_params):
-        state_dict = self.deserialize_model(global_model_params)
+    def start_client_processing(self, state_dict):
         self.client_model.load_state_dict(state_dict, strict=True)
+        self.train_client_model()
+     
+        if self.iid_measure is None:
+            self.measure_iid_nature()
+        return self.client_model.state_dict(), self.local_training_details["train_times"][-1], self.iid_measure
 
-    def get_client_model_params(self):
-        return self.serialize_model(self.client_model)
+    def evaluate_model_on_validation_data(self, model):
+        return self.get_weighted_val_accuracy(model = model, model_type=self.client_train_config["model_type"])
+    
+    def measure_iid_nature(self):
+        iid_measure_method = self.get_iid_measure_method()
+        iid_measure_time_start = time.time()
 
+        if iid_measure_method == "JSD":
+            iid_measure = float(self.get_agg_weight_jsd())
+        elif iid_measure_method == "SEBW":
+            iid_measure = float(self.get_shannon_entropy_weight_metric())
+        else:
+            iid_measure = None
+
+        iid_measure_duration = time.time() - iid_measure_time_start
+        self.iid_measure = iid_measure
+        self.local_training_details["iid_measure_time"] = iid_measure_duration
+
+    def get_iid_measure_method(self):
+        algorithm = self.client_train_config.get("selected_algorithm", None)
+        if algorithm in ["(1-JSD)", "AccuracyBased(1-JSD)"]:
+            return "JSD"
+        elif algorithm in ["SEBW", "AccuracyBased_SEBW"]:
+            return "SEBW"
+        else:
+            return None
+        
     # --------------------------------------------------------------------------
     # 📊 Dataset Analysis Methods
     # --------------------------------------------------------------------------
@@ -164,42 +170,34 @@ class Client:
     # --------------------------------------------------------------------------
     # 🧠 Model Training & Evaluation
     # --------------------------------------------------------------------------
-    def train_client_model(
-        self,
-        epochs,
-        selected_algorithm,
-        is_use_full_dataset=True,
-        model_type="VGG",
-        performance_optimization_types=[],
-
-        #For FedProx
-        mu=0.01,
-        global_model_params=None,
-    ):
+    def train_client_model(self):
         """
         Train the client model locally using the specified dataset and training type.
         """
+        # FedProx
+        if self.client_train_config["selected_algorithm"] == "FedProx":
+            global_model_params = copy.deepcopy(self.client_model.state_dict())
         self.client_model.train()
         train_time = time.time() 
 
         # Optimizer & loss
-        if model_type == "VGG":
+        if self.client_train_config["model_type"] == "VGG":
             optimizer = optim.SGD(self.client_model.parameters(), lr=1e-1)
             criterion = F.nll_loss
-        elif model_type == "NormalCNN":
+        elif self.client_train_config["model_type"] == "NormalCNN":
             optimizer = optim.SGD(self.client_model.parameters(), lr=1e-2)
             criterion = nn.CrossEntropyLoss()
         else:
-            raise ValueError(f"Invalid model type: {model_type}.")
+            raise ValueError(f"Invalid model type: {self.client_train_config["model_type"]}.")
 
         # Dataset loader
-        if is_use_full_dataset:
+        if self.client_train_config["is_use_full_dataset"]:
             dataloader = self.full_dataloader
         else:
             dataloader = self.trainloader
 
         # Train loop
-        for epoch in range(epochs):
+        for epoch in range(self.client_train_config["local_epochs"]):
             total_loss, correct, total = 0.0, 0, 0
 
             for inputs, labels in dataloader:
@@ -210,12 +208,12 @@ class Client:
                 loss = criterion(outputs, labels)
 
                 # FedProx proximal term
-                if selected_algorithm == "FedProx" and global_model_params is not None:
+                if self.client_train_config["selected_algorithm"] == "FedProx":
                     prox_term = 0.0
                     for name, param in self.client_model.named_parameters():
                         global_param = global_model_params[name].to(self.device)
                         prox_term += ((param - global_param) ** 2).sum()
-                    loss += (mu / 2) * prox_term
+                    loss += (self.client_train_config["fedprox_mu"] / 2) * prox_term
 
                 loss.backward()
                 optimizer.step()
@@ -227,7 +225,7 @@ class Client:
 
             avg_loss = total_loss / total
             accuracy = 100.0 * correct / total
-            print(f"[Client {self.id}] Epoch {epoch + 1}/{epochs} | Loss: {avg_loss:.4f} | Acc: {accuracy:.2f}%")
+            print(f"[Client {self.id}] Epoch {epoch + 1}/{self.client_train_config['local_epochs']} | Loss: {avg_loss:.4f} | Acc: {accuracy:.2f}%")
 
         train_duration = time.time() - train_time
         print(f"[Client {self.id}] Local training completed in {train_duration:.2f} seconds.")

@@ -29,3 +29,8 @@ psutil>=5.9.0
 python-dateutil>=2.8.2
 tqdm>=4.66.0
 argparse>=1.4.0
+
+#gRPC
+grpcio>=1.59.0
+grpcio-tools>=1.59.0
+protobuf>=4.25.0

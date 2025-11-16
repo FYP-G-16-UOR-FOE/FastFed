@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package fl_server;
+
+service ServerService {
+  // 1. Register client with server
+  rpc RegisterClient(ClientRegistrationRequest) returns (StatusResponse);
+}
+
+message ClientRegistrationRequest {
+  int32 client_id = 1;
+  string client_api_url = 2;
+}
+
+message StatusResponse {
+  string status = 1;
+}
