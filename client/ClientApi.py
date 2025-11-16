@@ -1,14 +1,14 @@
 import os
 
-import NormalCNN
 import requests
 import torch
-import VGG
 from fastapi import FastAPI
 from pydantic import BaseModel
 
 from client.Client import Client
 from dataset_partitioner.DatasetPartitioner import DatasetPartitioner
+from models.NormalCNN import NormalCNN
+from models.VGG import VGG
 
 app = FastAPI()
 
@@ -25,9 +25,9 @@ else:
 
 # Create clients datasets
 dataset_partitioner = DatasetPartitioner(
-    num_clients=NUM_CLIENTS,
+    n_clients=NUM_CLIENTS,
     batch_size=64,
-    max_class_per_client=20,
+    max_class_per_client=10,
     seed=42,
     verbose=True,
 )
@@ -37,8 +37,8 @@ client_datasets, _ = dataset_partitioner.split_cifar10_realworld()
 clients = [
     Client(
         id=i,
-        ip_address="localhost",
-        port=8000 + i, 
+        ip_address="127.0.0.1",
+        port=8000, 
         device=DEVICE, 
         model=global_model,
         client_dataset=client_datasets[i],
@@ -52,9 +52,10 @@ class GlobalModelRequest(BaseModel):
     global_model: dict
     model_type: str
 
-@app.post("api/receive/global-model")
+@app.post("/api/receive/global-model")
 def receive_global_model(req: GlobalModelRequest):
     client = clients[req.client_id]
+    print("Receiving global model at Client ID:", req.client_id)
     client.set_global_model_to_client(req.global_model)
     print("Received global model")
     return {"status": "global model received"}
@@ -67,7 +68,7 @@ class LocalTrainRequest(BaseModel):
     model_type: str
     performance_optimization_types: list
 
-@app.post("api/start/local-training")
+@app.post("/api/start/local-training")
 def start_local_training(req: LocalTrainRequest):
     print("Starting local training...")
     client = clients[req.client_id]
@@ -80,17 +81,21 @@ def start_local_training(req: LocalTrainRequest):
     )
     return {"status": "local training started"}
 
-@app.get("api/send/trained-model")
-def send_trained_model(req):
+class GetTrainedModelRequest(BaseModel):
+    client_id: int
+
+@app.get("/api/send/trained-model")
+def send_trained_model(req: GetTrainedModelRequest):
     print("Sending trained model")
     client = clients[req.client_id]
     trained_model = client.get_client_model_params()
-    return {"trained_model": trained_model}
+    trained_duration = client.local_training_details["train_times"][-1] if client.local_training_details["train_times"] else None
+    return {"trained_model": trained_model, "training_duration": trained_duration}
 
 # Register Clients
 for client in clients:
     print(f"Registering Client ID: {client.id} at {client.ip_address}:{client.port}")
-    server_register_url = "http:/localhost:9000/register"
+    server_register_url = "http://127.0.0.1:9000/api/register"
     
     try:
         response = requests.post(
@@ -100,3 +105,12 @@ for client in clients:
         print(f"Client ID: {client.id} registered successfully.")
     except requests.exceptions.RequestException as e:
         print(f"Failed to register Client ID: {client.id}. Error: {e}")
+
+# Start Federated Learning
+start_fl_url = "http://127.0.0.1:9000/api/start-federated-learning"
+try:
+    response = requests.post(url=start_fl_url)
+    response.raise_for_status()
+    print("Federated Learning started successfully.")
+except requests.exceptions.RequestException as e:
+    print(f"Failed to start Federated Learning. Error: {e}")

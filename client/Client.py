@@ -1,4 +1,5 @@
 import copy
+import time
 from collections import Counter, defaultdict
 
 import numpy as np
@@ -30,6 +31,13 @@ class Client:
         self.batch_size = batch_size
         self.device = device
         self.client_model = model
+        self.local_training_details = {
+            "train_times": [],
+            "train_accuracies": [],
+            "val_accuracies": [],
+            "train_losses": [],
+            "val_losses": []
+        }
 
         full_dataset = client_dataset
 
@@ -58,9 +66,33 @@ class Client:
             for k, v in state_dict.items()
         }
         return serialized
+    
+    def deserialize_model(self, serialized_state):
+        """
+        Convert a JSON-serializable model dictionary back into a PyTorch state_dict.
+        Lists → Tensors
+        Scalars → Tensors
+        """
+        deserialized_state = {}
+
+        for k, v in serialized_state.items():
+            # Case 1: list (weights/bias tensors)
+            if isinstance(v, list):
+                deserialized_state[k] = torch.tensor(v)
+
+            # Case 2: scalar numpy values that were converted using .item()
+            elif isinstance(v, (int, float)):
+                deserialized_state[k] = torch.tensor(v)
+
+            # Case 3: fallback (should not happen normally)
+            else:
+                deserialized_state[k] = torch.tensor(v)
+
+        return deserialized_state
 
     def set_global_model_to_client(self, global_model_params):
-        self.client_model.load_state_dict(copy.deepcopy(global_model_params))
+        state_dict = self.deserialize_model(global_model_params)
+        self.client_model.load_state_dict(state_dict, strict=True)
 
     def get_client_model_params(self):
         return self.serialize_model(self.client_model)
@@ -148,6 +180,7 @@ class Client:
         Train the client model locally using the specified dataset and training type.
         """
         self.client_model.train()
+        train_time = time.time() 
 
         # Optimizer & loss
         if model_type == "VGG":
@@ -196,6 +229,11 @@ class Client:
             accuracy = 100.0 * correct / total
             print(f"[Client {self.id}] Epoch {epoch + 1}/{epochs} | Loss: {avg_loss:.4f} | Acc: {accuracy:.2f}%")
 
+        train_duration = time.time() - train_time
+        print(f"[Client {self.id}] Local training completed in {train_duration:.2f} seconds.")
+        self.local_training_details["train_times"].append(train_duration)
+        self.local_training_details["train_accuracies"].append(accuracy)
+        self.local_training_details["train_losses"].append(avg_loss)
 
     # --------------------------------------------------------------------------
     # 🧪 Testing and Validation

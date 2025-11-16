@@ -1,13 +1,12 @@
 import os
 
-import NormalCNN
 import torch
-import VGG
-import wandb
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI
 from pydantic import BaseModel
 
-from client.Client import Client
+import wandb
+from models.NormalCNN import NormalCNN
+from models.VGG import VGG
 from server.Server import Server
 
 app = FastAPI()
@@ -27,7 +26,7 @@ EXPERIMENT_NAME = f"{SELECTED_ALGORITHM}"
 RESULTS_FOLDER_NAME = f'EX-{EXPERIMENT_NAME}_M-{SELECTED_MODEL}_FLR-{FL_ROUNDS}_NC-{NUM_CLIENTS}_CLE-{LOCAL_EPOCHS}_DST-{DATASET_DISTRIBUTION_TYPE}'
 RESULTS_DIR = os.path.join(RESULTS_SAVE_PATH, RESULTS_FOLDER_NAME)
 
-# 🧭 Initialize wandb
+""" # 🧭 Initialize wandb
 wandb.login(key="cca506f824e9db910b7b4a407afc0b36ba655c28")
 wandb.init(
     project=f"FL-Test_0",
@@ -41,7 +40,7 @@ wandb.init(
         "device": str(DEVICE)
     },
     name=EXPERIMENT_NAME
-)
+) """
 
 # Initialize the Global model and Server
 if SELECTED_MODEL == "NormalCNN":
@@ -49,22 +48,16 @@ if SELECTED_MODEL == "NormalCNN":
 else:
     global_model = VGG('VGG19').to(DEVICE)
 
-# Initialize Clients
-clients = [Client(id=i, device=DEVICE, model=global_model)
-            for i in range(NUM_CLIENTS)]
-
 # Initialize the Server
 server = Server(
-    model=global_model,
+    global_model=global_model,
     device=DEVICE,
     model_type=SELECTED_MODEL,
-    clients=clients,
     fl_rounds=FL_ROUNDS,
     local_epochs=LOCAL_EPOCHS,
+    num_clients=NUM_CLIENTS,
     num_selected_clients=NUM_SELECTED_CLIENTS,
-    dataset_distribution_type=DATASET_DISTRIBUTION_TYPE,
     results_save_dir=RESULTS_DIR,
-    selected_performance_optimization_types=SELECTED_PERFORMANCE_OPTIMIZATION_TYPES,
     selected_algorithm=SELECTED_ALGORITHM
 )
 
@@ -72,13 +65,17 @@ class RegisterRequest(BaseModel):
     client_id: int
     client_api_url: str
 
-@app.post("/register")
+@app.post("/api/register")
 def register_client(req: RegisterRequest):
+    if req.client_id in server.clients["clients_ids"]:
+        return {"status": "already registered"}
     server.clients["clients_ids"].append(req.client_id)
     server.clients["client_api_urls"].append(req.client_api_url)
-
-    # If all clients registered, auto-start FL
-    if len(server.clients["clients_ids"]) == NUM_CLIENTS:
-        server.start_federated_learning()
-    
     return {"status": "registered"}
+
+@app.post("/api/start-federated-learning")
+async def start_federated_learning(background_tasks: BackgroundTasks):
+    if len(server.clients["clients_ids"]) == NUM_CLIENTS:
+        background_tasks.add_task(server.start_federated_learning)
+    return {"status": "FL started in background"}
+

@@ -13,16 +13,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
-import wandb
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
+import wandb
+
 torch.backends.cudnn.benchmark = True
 
 class Server:
-    def __init__(self, device, global_model, model_type, fl_rounds, num_clients, num_selected_clients, local_epochs, results_save_dir):
+    def __init__(self, device, global_model, model_type, fl_rounds, num_clients, num_selected_clients, local_epochs, selected_algorithm, results_save_dir):
         """
         Server class for Federated Learning aggregation and coordination.
         """
@@ -40,10 +41,11 @@ class Server:
             "model_type": model_type,
             "num_clients": num_clients,
             "num_selected_clients": num_selected_clients,
-            "results_save_dir": results_save_dir
+            "results_save_dir": results_save_dir,
+            "is_use_full_dataset": True,
         }
         self.fl_accuracy = {
-            "selected_algorithm": None,
+            "selected_algorithm": selected_algorithm,
             "iid_agg_weights": [],
             "accuracy_based_agg_weights": [],
         }
@@ -63,6 +65,7 @@ class Server:
             "round_global_model_send_time": [],
             "round_client_model_recv_time": [],
             "round_global_model_size_bytes": [],
+            "global_model_size_bytes": [],
         }
         
         # Global test dataset (CIFAR-10)
@@ -101,6 +104,30 @@ class Server:
             for k, v in state_dict.items()
         }
         return serialized
+    
+    def deserialize_model(self, serialized_state):
+        """
+        Convert a JSON-serializable model dictionary back into a PyTorch state_dict.
+        Lists → Tensors
+        Scalars → Tensors
+        """
+        deserialized_state = {}
+
+        for k, v in serialized_state.items():
+            # Case 1: list (weights/bias tensors)
+            if isinstance(v, list):
+                deserialized_state[k] = torch.tensor(v)
+
+            # Case 2: scalar numpy values that were converted using .item()
+            elif isinstance(v, (int, float)):
+                deserialized_state[k] = torch.tensor(v)
+
+            # Case 3: fallback (should not happen normally)
+            else:
+                deserialized_state[k] = torch.tensor(v)
+
+        return deserialized_state
+
     
     def cal_size(self, obj):
         """Calculate the size of a Python object in bytes."""
@@ -173,9 +200,9 @@ class Server:
         correct, total, total_loss = 0, 0, 0.0
 
          # Select loss function
-        if self.model_type == "VGG":
+        if self.fl_train_config["model_type"] == "VGG":
             criterion = F.nll_loss
-        elif self.model_type == "NormalCNN":
+        elif self.fl_train_config["model_type"] == "NormalCNN":
             criterion = nn.CrossEntropyLoss()
         else:
             raise ValueError(f"Invalid model type: {self.model_type}.")
@@ -306,7 +333,7 @@ class Server:
         rng = np.random.default_rng(42)
 
         # IID Based Aggregation Weights
-        if self.fl_accuracy["selected_algorithm"].index("JSD") != -1 or self.fl_accuracy["selected_algorithm"].index("SEBW") != -1:
+        if self.fl_accuracy["selected_algorithm"] == "(1-JSD)":
             print("Calculating IID Aggregation Weights")
             for cid in self.fl_train_config["clients_ids"]:
                 client_send_iid_measure_url = self.clients["client_api_urls"][cid] + "/send/iid-measure"
@@ -334,7 +361,7 @@ class Server:
 
 
         # Federated Learning Rounds
-        for fl_round in range(range(self.fl_train_config["fl_rounds"])):
+        for fl_round in range(self.fl_train_config["fl_rounds"]):
             print(f"\n{'='*80}\n FEDERATED LEARNING ROUND {fl_round + 1}/{self.fl_train_config["fl_rounds"]}\n{'='*80}")
             round_start_time = time.time()
             
@@ -363,12 +390,16 @@ class Server:
                 client_start_local_training_url = self.clients["client_api_urls"][cid] + "/start/local-training"
                 client_send_trained_model_url = self.clients["client_api_urls"][cid] + "/send/trained-model"
 
+                print("Api Url: ", client_receive_global_model_url)
+                print("Api Url: ", client_start_local_training_url)
+                print("Api Url: ", client_send_trained_model_url)
+
                 # Send the global model to the client
                 time_ref = time.time()
                 try:
                     response = requests.post(
                         client_receive_global_model_url, 
-                        json={"client_id": cid, "global_model": global_model_json, "model_type": self.fl_train_config["model_type"]}, 
+                        json={"client_id": int(cid), "global_model": global_model_json, "model_type": self.fl_train_config["model_type"]}, 
                         timeout=None
                     )
                     response.raise_for_status()
@@ -380,15 +411,16 @@ class Server:
                 except Exception as e:
                     send_duration = time.time() - time_ref
                     print(f"Failed to send global model to Client {cid} after {send_duration:.4f} sec: {e}")
+                    raise Exception
 
                 # Start Client local training
                 try:
                     response = requests.post(
                         client_start_local_training_url, 
                         json={
-                            "client_id": cid,
+                            "client_id": int(cid),
                             "epochs": self.fl_train_config["local_epochs"],
-                            "selected_algorithm": self.fl_train_config["selected_algorithm"],
+                            "selected_algorithm": self.fl_accuracy["selected_algorithm"],
                             "is_use_full_dataset": self.fl_train_config["is_use_full_dataset"],
                             "model_type": self.fl_train_config["model_type"],
                             "performance_optimization_types": self.fl_performance["selected_performance_optimization_types"],
@@ -399,27 +431,30 @@ class Server:
                     print(f"✓ Started local training for Client {cid}")
                 except Exception as e:
                     print(f"Failed to start local training for Client {cid}: {e}")
+                    raise Exception
 
                 # Receive the trained model from the client
                 time_ref = time.time()
                 try:
                     response = requests.get(
                         client_send_trained_model_url, 
-                        json={"client_id": cid},
+                        json={"client_id": int(cid)},
                         timeout=None
                     )
                     response.raise_for_status()
                     client_result = response.json()
                     recv_duration = time.time() - time_ref
                     round_global_recv_time = round_global_recv_time + recv_duration
+                    client_model_params = client_result['trained_model']
+                    train_duration = client_result['training_duration']
+                    self.clients["selected_clients_models"][cid].append(self.deserialize_model(client_model_params))
+                    round_local_train_time = round_local_train_time + train_duration
                     print(f"✓ Received trained model from Client {cid} in {recv_duration:.4f} sec")
                 except Exception as e:
                     print(f"Failed to receive trained model from Client {cid}: {e}")
+                    raise Exception
 
-                client_model_params = client_result['client_model_params']
-                train_duration = client_result['train_duration']
-                self.clients["selected_clients_models"][cid].append(client_model_params)
-                round_local_train_time = round_local_train_time + train_duration
+                
 
             # Record communication times
             self.history["round_global_model_send_time"].append(round_global_send_time)
