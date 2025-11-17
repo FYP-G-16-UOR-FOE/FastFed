@@ -4,9 +4,18 @@ package fl_client;
 
 service ClientService {
   // 1. Receive global model from server
-  rpc ReceiveGlobalModel(ReceiveGlobalModelRequest) returns (ReceiveGlobalModelResponse);
+  rpc ReceiveGlobalModel(ReceiveGlobalModelRequest) returns (StatusResponse);
 
-  // 2. Get trained model from client
+  // 2. Start local client training
+  rpc StartLocalTraining(StartLocalTrainingRequest) returns (StatusResponse);
+
+  // 3. Get Clients Trained Model
+  rpc GetClientsTrainedModel(GetClientsTrainedModelRequest) returns (GetClientsTrainedModelResponse);
+
+  // 4. Get IID measure
+  rpc GetIIDMeasure(GetIIDMeasureRequest) returns (GetIIDMeasureResponse);
+
+  // 5. Receive model for accuracy-based measurement
   rpc ReceiveModelForAccuracyBasedMeasure(AccuracyBasedMeasureRequest) returns (AccuracyBasedMeasureResponse);
 }
 
@@ -16,13 +25,6 @@ message ReceiveGlobalModelRequest {
   string model_type = 3;
 }
 
-message ReceiveGlobalModelResponse {
-    int32 client_id = 1;
-    bytes client_model = 2;
-    float training_time = 3;
-    float iid_measure = 4;
-}
-
 message AccuracyBasedMeasureRequest {
   int32 client_id = 1;
   bytes model = 2;
@@ -30,5 +32,33 @@ message AccuracyBasedMeasureRequest {
 }
 
 message AccuracyBasedMeasureResponse {
-  float weighted_val_acc = 1;
+  int32 client_id = 1;
+  float weighted_val_acc = 2;
+}
+
+message StartLocalTrainingRequest {
+  int32 client_id = 1;
+}
+
+message GetIIDMeasureRequest {
+  int32 client_id = 1;
+}
+
+message GetIIDMeasureResponse {
+  int32 client_id = 1;
+  float iid_measure = 2;
+}
+
+message GetClientsTrainedModelRequest {
+  int32 client_id = 1;
+}
+
+message GetClientsTrainedModelResponse {
+  int32 client_id = 1;
+  bytes trained_model = 2;
+  float training_time = 3;
+}
+
+message StatusResponse {
+  string status = 1;
 }

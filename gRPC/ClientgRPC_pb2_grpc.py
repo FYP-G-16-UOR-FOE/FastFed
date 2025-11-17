@@ -37,7 +37,22 @@ class ClientServiceStub(object):
         self.ReceiveGlobalModel = channel.unary_unary(
                 '/fl_client.ClientService/ReceiveGlobalModel',
                 request_serializer=gRPC_dot_ClientgRPC__pb2.ReceiveGlobalModelRequest.SerializeToString,
-                response_deserializer=gRPC_dot_ClientgRPC__pb2.ReceiveGlobalModelResponse.FromString,
+                response_deserializer=gRPC_dot_ClientgRPC__pb2.StatusResponse.FromString,
+                _registered_method=True)
+        self.StartLocalTraining = channel.unary_unary(
+                '/fl_client.ClientService/StartLocalTraining',
+                request_serializer=gRPC_dot_ClientgRPC__pb2.StartLocalTrainingRequest.SerializeToString,
+                response_deserializer=gRPC_dot_ClientgRPC__pb2.StatusResponse.FromString,
+                _registered_method=True)
+        self.GetClientsTrainedModel = channel.unary_unary(
+                '/fl_client.ClientService/GetClientsTrainedModel',
+                request_serializer=gRPC_dot_ClientgRPC__pb2.GetClientsTrainedModelRequest.SerializeToString,
+                response_deserializer=gRPC_dot_ClientgRPC__pb2.GetClientsTrainedModelResponse.FromString,
+                _registered_method=True)
+        self.GetIIDMeasure = channel.unary_unary(
+                '/fl_client.ClientService/GetIIDMeasure',
+                request_serializer=gRPC_dot_ClientgRPC__pb2.GetIIDMeasureRequest.SerializeToString,
+                response_deserializer=gRPC_dot_ClientgRPC__pb2.GetIIDMeasureResponse.FromString,
                 _registered_method=True)
         self.ReceiveModelForAccuracyBasedMeasure = channel.unary_unary(
                 '/fl_client.ClientService/ReceiveModelForAccuracyBasedMeasure',
@@ -56,8 +71,29 @@ class ClientServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def StartLocalTraining(self, request, context):
+        """2. Start local client training
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetClientsTrainedModel(self, request, context):
+        """3. Get Clients Trained Model
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetIIDMeasure(self, request, context):
+        """4. Get IID measure
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ReceiveModelForAccuracyBasedMeasure(self, request, context):
-        """2. Get trained model from client
+        """5. Receive model for accuracy-based measurement
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -69,7 +105,22 @@ def add_ClientServiceServicer_to_server(servicer, server):
             'ReceiveGlobalModel': grpc.unary_unary_rpc_method_handler(
                     servicer.ReceiveGlobalModel,
                     request_deserializer=gRPC_dot_ClientgRPC__pb2.ReceiveGlobalModelRequest.FromString,
-                    response_serializer=gRPC_dot_ClientgRPC__pb2.ReceiveGlobalModelResponse.SerializeToString,
+                    response_serializer=gRPC_dot_ClientgRPC__pb2.StatusResponse.SerializeToString,
+            ),
+            'StartLocalTraining': grpc.unary_unary_rpc_method_handler(
+                    servicer.StartLocalTraining,
+                    request_deserializer=gRPC_dot_ClientgRPC__pb2.StartLocalTrainingRequest.FromString,
+                    response_serializer=gRPC_dot_ClientgRPC__pb2.StatusResponse.SerializeToString,
+            ),
+            'GetClientsTrainedModel': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetClientsTrainedModel,
+                    request_deserializer=gRPC_dot_ClientgRPC__pb2.GetClientsTrainedModelRequest.FromString,
+                    response_serializer=gRPC_dot_ClientgRPC__pb2.GetClientsTrainedModelResponse.SerializeToString,
+            ),
+            'GetIIDMeasure': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetIIDMeasure,
+                    request_deserializer=gRPC_dot_ClientgRPC__pb2.GetIIDMeasureRequest.FromString,
+                    response_serializer=gRPC_dot_ClientgRPC__pb2.GetIIDMeasureResponse.SerializeToString,
             ),
             'ReceiveModelForAccuracyBasedMeasure': grpc.unary_unary_rpc_method_handler(
                     servicer.ReceiveModelForAccuracyBasedMeasure,
@@ -103,7 +154,88 @@ class ClientService(object):
             target,
             '/fl_client.ClientService/ReceiveGlobalModel',
             gRPC_dot_ClientgRPC__pb2.ReceiveGlobalModelRequest.SerializeToString,
-            gRPC_dot_ClientgRPC__pb2.ReceiveGlobalModelResponse.FromString,
+            gRPC_dot_ClientgRPC__pb2.StatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StartLocalTraining(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/fl_client.ClientService/StartLocalTraining',
+            gRPC_dot_ClientgRPC__pb2.StartLocalTrainingRequest.SerializeToString,
+            gRPC_dot_ClientgRPC__pb2.StatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetClientsTrainedModel(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/fl_client.ClientService/GetClientsTrainedModel',
+            gRPC_dot_ClientgRPC__pb2.GetClientsTrainedModelRequest.SerializeToString,
+            gRPC_dot_ClientgRPC__pb2.GetClientsTrainedModelResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetIIDMeasure(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/fl_client.ClientService/GetIIDMeasure',
+            gRPC_dot_ClientgRPC__pb2.GetIIDMeasureRequest.SerializeToString,
+            gRPC_dot_ClientgRPC__pb2.GetIIDMeasureResponse.FromString,
             options,
             channel_credentials,
             insecure,

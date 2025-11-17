@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x15gRPC/ClientgRPC.proto\x12\tfl_client\"X\n\x19ReceiveGlobalModelRequest\x12\x11\n\tclient_id\x18\x01 \x01(\x05\x12\x14\n\x0cglobal_model\x18\x02 \x01(\x0c\x12\x12\n\nmodel_type\x18\x03 \x01(\t\"q\n\x1aReceiveGlobalModelResponse\x12\x11\n\tclient_id\x18\x01 \x01(\x05\x12\x14\n\x0c\x63lient_model\x18\x02 \x01(\x0c\x12\x15\n\rtraining_time\x18\x03 \x01(\x02\x12\x13\n\x0biid_measure\x18\x04 \x01(\x02\"S\n\x1b\x41\x63\x63uracyBasedMeasureRequest\x12\x11\n\tclient_id\x18\x01 \x01(\x05\x12\r\n\x05model\x18\x02 \x01(\x0c\x12\x12\n\nmodel_type\x18\x03 \x01(\t\"8\n\x1c\x41\x63\x63uracyBasedMeasureResponse\x12\x18\n\x10weighted_val_acc\x18\x01 \x01(\x02\x32\xea\x01\n\rClientService\x12\x61\n\x12ReceiveGlobalModel\x12$.fl_client.ReceiveGlobalModelRequest\x1a%.fl_client.ReceiveGlobalModelResponse\x12v\n#ReceiveModelForAccuracyBasedMeasure\x12&.fl_client.AccuracyBasedMeasureRequest\x1a\'.fl_client.AccuracyBasedMeasureResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x15gRPC/ClientgRPC.proto\x12\tfl_client\"X\n\x19ReceiveGlobalModelRequest\x12\x11\n\tclient_id\x18\x01 \x01(\x05\x12\x14\n\x0cglobal_model\x18\x02 \x01(\x0c\x12\x12\n\nmodel_type\x18\x03 \x01(\t\"S\n\x1b\x41\x63\x63uracyBasedMeasureRequest\x12\x11\n\tclient_id\x18\x01 \x01(\x05\x12\r\n\x05model\x18\x02 \x01(\x0c\x12\x12\n\nmodel_type\x18\x03 \x01(\t\"K\n\x1c\x41\x63\x63uracyBasedMeasureResponse\x12\x11\n\tclient_id\x18\x01 \x01(\x05\x12\x18\n\x10weighted_val_acc\x18\x02 \x01(\x02\".\n\x19StartLocalTrainingRequest\x12\x11\n\tclient_id\x18\x01 \x01(\x05\")\n\x14GetIIDMeasureRequest\x12\x11\n\tclient_id\x18\x01 \x01(\x05\"?\n\x15GetIIDMeasureResponse\x12\x11\n\tclient_id\x18\x01 \x01(\x05\x12\x13\n\x0biid_measure\x18\x02 \x01(\x02\"2\n\x1dGetClientsTrainedModelRequest\x12\x11\n\tclient_id\x18\x01 \x01(\x05\"a\n\x1eGetClientsTrainedModelResponse\x12\x11\n\tclient_id\x18\x01 \x01(\x05\x12\x15\n\rtrained_model\x18\x02 \x01(\x0c\x12\x15\n\rtraining_time\x18\x03 \x01(\x02\" \n\x0eStatusResponse\x12\x0e\n\x06status\x18\x01 \x01(\t2\xf8\x03\n\rClientService\x12U\n\x12ReceiveGlobalModel\x12$.fl_client.ReceiveGlobalModelRequest\x1a\x19.fl_client.StatusResponse\x12U\n\x12StartLocalTraining\x12$.fl_client.StartLocalTrainingRequest\x1a\x19.fl_client.StatusResponse\x12m\n\x16GetClientsTrainedModel\x12(.fl_client.GetClientsTrainedModelRequest\x1a).fl_client.GetClientsTrainedModelResponse\x12R\n\rGetIIDMeasure\x12\x1f.fl_client.GetIIDMeasureRequest\x1a .fl_client.GetIIDMeasureResponse\x12v\n#ReceiveModelForAccuracyBasedMeasure\x12&.fl_client.AccuracyBasedMeasureRequest\x1a\'.fl_client.AccuracyBasedMeasureResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,12 +33,22 @@ if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_RECEIVEGLOBALMODELREQUEST']._serialized_start=36
   _globals['_RECEIVEGLOBALMODELREQUEST']._serialized_end=124
-  _globals['_RECEIVEGLOBALMODELRESPONSE']._serialized_start=126
-  _globals['_RECEIVEGLOBALMODELRESPONSE']._serialized_end=239
-  _globals['_ACCURACYBASEDMEASUREREQUEST']._serialized_start=241
-  _globals['_ACCURACYBASEDMEASUREREQUEST']._serialized_end=324
-  _globals['_ACCURACYBASEDMEASURERESPONSE']._serialized_start=326
-  _globals['_ACCURACYBASEDMEASURERESPONSE']._serialized_end=382
-  _globals['_CLIENTSERVICE']._serialized_start=385
-  _globals['_CLIENTSERVICE']._serialized_end=619
+  _globals['_ACCURACYBASEDMEASUREREQUEST']._serialized_start=126
+  _globals['_ACCURACYBASEDMEASUREREQUEST']._serialized_end=209
+  _globals['_ACCURACYBASEDMEASURERESPONSE']._serialized_start=211
+  _globals['_ACCURACYBASEDMEASURERESPONSE']._serialized_end=286
+  _globals['_STARTLOCALTRAININGREQUEST']._serialized_start=288
+  _globals['_STARTLOCALTRAININGREQUEST']._serialized_end=334
+  _globals['_GETIIDMEASUREREQUEST']._serialized_start=336
+  _globals['_GETIIDMEASUREREQUEST']._serialized_end=377
+  _globals['_GETIIDMEASURERESPONSE']._serialized_start=379
+  _globals['_GETIIDMEASURERESPONSE']._serialized_end=442
+  _globals['_GETCLIENTSTRAINEDMODELREQUEST']._serialized_start=444
+  _globals['_GETCLIENTSTRAINEDMODELREQUEST']._serialized_end=494
+  _globals['_GETCLIENTSTRAINEDMODELRESPONSE']._serialized_start=496
+  _globals['_GETCLIENTSTRAINEDMODELRESPONSE']._serialized_end=593
+  _globals['_STATUSRESPONSE']._serialized_start=595
+  _globals['_STATUSRESPONSE']._serialized_end=627
+  _globals['_CLIENTSERVICE']._serialized_start=630
+  _globals['_CLIENTSERVICE']._serialized_end=1134
 # @@protoc_insertion_point(module_scope)

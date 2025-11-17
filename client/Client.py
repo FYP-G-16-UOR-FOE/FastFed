@@ -68,13 +68,18 @@ class Client:
         self.dataset_size = train_size
         self.val_size = val_size
 
-    def start_client_processing(self, state_dict):
+    def receive_global_model(self, state_dict):
         self.client_model.load_state_dict(state_dict, strict=True)
+
+    def start_client_local_training(self):
         self.train_client_model()
-     
-        if self.iid_measure is None:
-            self.measure_iid_nature()
-        return self.client_model.state_dict(), self.local_training_details["train_times"][-1], self.iid_measure
+
+    def get_client_updates(self):
+        return self.client_model.state_dict(), self.local_training_details["train_times"][-1]
+    
+    def calculate_iid_measure(self):
+        self.measure_iid_nature()
+        return self.iid_measure
 
     def evaluate_model_on_validation_data(self, model):
         return self.get_weighted_val_accuracy(model = model, model_type=self.client_train_config["model_type"])

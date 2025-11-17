@@ -11,27 +11,25 @@ Assumes the generated protobuf modules exist and that message fields for model b
 are declared as `bytes` in the proto (e.g. `bytes client_model = 3;`).
 """
 
-import grpc
-from concurrent import futures
+import copy
+import io
 import multiprocessing
+import os
+import sys
 import threading
 import time
-import io
-import copy
-import sys
+from concurrent import futures
 from typing import List
 
-from gRPC import ServergRPC_pb2
-from gRPC import ServergRPC_pb2_grpc
-from gRPC import ClientgRPC_pb2
-from gRPC import ClientgRPC_pb2_grpc
-
-import os
+import grpc
 import torch
 
+import wandb
 # Local imports (assumed present)
 from client.Client import Client
 from dataset_partitioner.DatasetPartitioner import DatasetPartitioner
+from gRPC import (ClientgRPC_pb2, ClientgRPC_pb2_grpc, ServergRPC_pb2,
+                  ServergRPC_pb2_grpc)
 from models.NormalCNN import NormalCNN
 from models.VGG import VGG
 from server.Server import Server
@@ -47,7 +45,7 @@ DATASET_PARTITIONER_MAX_CLASS_PER_CLIENT = 10
 DATASET_PARTITIONER_SEED = 42
 IS_USE_FULL_DATASET = True
 SELECTED_MODEL = "VGG"  # "VGG" or "NormalCNN"
-SELECTED_ALGORITHM = "FedAvg"
+SELECTED_ALGORITHM = "(1-JSD)"
 FEDPROX_MU = 0.0
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 RESULTS_SAVE_PATH = './history'
@@ -114,13 +112,48 @@ class ClientServicer(ClientgRPC_pb2_grpc.ClientServiceServicer):
         print(f"[ClientServicer] ReceiveGlobalModel for client {client_id}")
         try:
             state_dict = deserialize_state_dict(model_bytes, map_location=self.clients[client_id].device)
-            client_model_params, training_time, iid_measure = self.clients[client_id].start_client_processing(state_dict)
-            client_model_bytes = serialize_state_dict(client_model_params)
-    
-            
-            return ClientgRPC_pb2.ReceiveGlobalModelResponse(client_id=client_id, client_model=client_model_bytes, training_time=training_time, iid_measure=iid_measure)
+            self.clients[client_id].receive_global_model(state_dict)
+            return ClientgRPC_pb2.StatusResponse(status="OK")
         except Exception as e:
             print("[Client] Error applying global model:", e, file=sys.stderr)
+            raise e
+        
+    def StartLocalTraining(self, request, context):
+        client_id = request.client_id
+        print(f"[ClientServicer] StartLocalTraining for client {client_id}")
+        try:
+            self.clients[client_id].start_client_local_training()
+            return ClientgRPC_pb2.StatusResponse(status="OK")
+        except Exception as e:
+            print("[Client] Error during local training:", e, file=sys.stderr)
+            raise e
+        
+    def GetClientsTrainedModel(self, request, context):
+        client_id = request.client_id
+        print(f"[ClientServicer] GetClientsTrainedModel for client {client_id}")
+        try:
+            client_model_params, training_time = self.clients[client_id].get_client_updates()
+            trained_model_bytes = serialize_state_dict(client_model_params)
+            return ClientgRPC_pb2.GetClientsTrainedModelResponse(
+                client_id=client_id,
+                trained_model=trained_model_bytes,
+                training_time=training_time
+            )
+        except Exception as e:
+            print("[Client] Error getting trained model:", e, file=sys.stderr)
+            raise e
+        
+    def GetIIDMeasure(self, request, context):
+        client_id = request.client_id
+        print(f"[ClientServicer] GetIIDMeasure for client {client_id}")
+        try:
+            iid_measure = self.clients[client_id].calculate_iid_measure()
+            return ClientgRPC_pb2.GetIIDMeasureResponse(
+                client_id=client_id,
+                iid_measure=iid_measure
+            )
+        except Exception as e:
+            print("[Client] Error calculating IID measure:", e, file=sys.stderr)
             raise e
 
     def ReceiveModelForAccuracyBasedMeasure(self, request, context):
@@ -160,6 +193,22 @@ def server_serve():
     # Run federated learning in a background thread so gRPC can still accept RPCs
     # Wait for client registrations
     wait_until_clients_register(servicer.server)
+
+    # 🧭 Initialize wandb
+    wandb.login(key="cca506f824e9db910b7b4a407afc0b36ba655c28")
+    wandb.init(
+        project=f"FL-Test_0",
+        config={
+            "model": SELECTED_MODEL,
+            "fl_rounds": FL_ROUNDS,
+            "clients": NUM_CLIENTS,
+            "selected_clients": NUM_SELECTED_CLIENTS,
+            "local_epochs": LOCAL_EPOCHS,
+            "dataset_distribution": "Realistic Non-IID",
+            "device": str(DEVICE)
+        },
+        name=SELECTED_ALGORITHM
+    )   
 
     # Start FL loop
     fl_thread = threading.Thread(target=servicer.server.start_federated_learning, daemon=True)

@@ -1,11 +1,12 @@
 import collections
 import copy
-import os
 import io
+import os
 import pickle
 import time
 from collections import Counter
 
+import grpc
 import matplotlib.pyplot as plt
 import numpy as np
 import psutil
@@ -20,9 +21,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 
 import wandb
-import grpc
-from gRPC import ClientgRPC_pb2
-from gRPC import ClientgRPC_pb2_grpc
+from gRPC import ClientgRPC_pb2, ClientgRPC_pb2_grpc
 
 torch.backends.cudnn.benchmark = True
 
@@ -70,6 +69,8 @@ class Server:
             "round_client_model_recv_time": [],
             "round_global_model_size_bytes": [],
             "global_model_size_bytes": [],
+            "total_iid_agg_weights_cal_time": 0.0,
+            "acc_based_agg_weights_cal_time": [],
         }
         
         # Global test dataset (CIFAR-10)
@@ -146,54 +147,96 @@ class Server:
     
     def fed_avg(self, weights_list):
         """
-        Perform standard FedAvg aggregation on a list of parameter OrderedDicts (with NumPy arrays as values).
-        Returns an OrderedDict of PyTorch tensors.
+        Perform standard FedAvg aggregation on a list of parameter OrderedDicts.
+        Handles NumPy arrays, PyTorch tensors, and scalars.
         """
         avg_params = collections.OrderedDict()
-        for key in weights_list[0].keys():
-            stacked = np.stack([w[key] for w in weights_list])
-            avg_params[key] = torch.from_numpy(np.mean(stacked, axis=0))
-        return avg_params
 
+        for key in weights_list[0].keys():
+            vals = []
+
+            for w in weights_list:
+                v = w[key]
+
+                # Convert PyTorch tensor → numpy
+                if isinstance(v, torch.Tensor):
+                    v = v.cpu().numpy()
+
+                # Convert scalar → ndarray
+                if np.isscalar(v):
+                    v = np.array(v)
+
+                vals.append(v)
+
+            stacked = np.stack(vals)
+            avg_params[key] = torch.tensor(np.mean(stacked, axis=0))
+
+        return avg_params
+    
     def weighted_fed_avg(self, weights_list, agg_weights):
         """
-        Perform weighted FedAvg aggregation on a list of parameter OrderedDicts (NumPy arrays as values) and weights.
-        Returns an OrderedDict of PyTorch tensors.
+        Weighted FedAvg (handles arrays, tensors, scalars).
         """
         total_weight = sum(agg_weights)
         avg_params = collections.OrderedDict()
-        for key in weights_list[0].keys():
-            stacked = np.stack([w[key] * agg_weights[i] for i, w in enumerate(weights_list)])
-            avg_params[key] = torch.from_numpy(np.sum(stacked, axis=0) / total_weight)
-        return avg_params
 
+        for key in weights_list[0].keys():
+            vals = []
+
+            for i, w in enumerate(weights_list):
+                v = w[key]
+
+                if isinstance(v, torch.Tensor):
+                    v = v.cpu().numpy()
+
+                if np.isscalar(v):
+                    v = np.array(v)
+
+                vals.append(v * agg_weights[i])
+
+            stacked = np.stack(vals)
+            avg_params[key] = torch.tensor(np.sum(stacked, axis=0) / total_weight)
+
+        return avg_params
+    
     def aggregate_models(self, client_models=None, agg_weights=None):
-        """
-        Aggregate client models using FedAvg or Weighted FedAvg, Flower-style (NumPy conversion).
-        Accepts a list of client model state_dicts (PyTorch) in client_models.
-        """
         if client_models is None:
-            client_models = self.selected_clients_models
-        # Convert PyTorch state_dicts to OrderedDicts of NumPy arrays
+            client_models = self.clients["selected_clients_models"]
+
         weights_list = []
+
         for client_model in client_models:
             state_dict = client_model.state_dict() if hasattr(client_model, "state_dict") else client_model
             weights_np = collections.OrderedDict()
+
             for k, v in state_dict.items():
+
+                # Tensor → numpy or scalar numpy
                 if isinstance(v, torch.Tensor):
-                    weights_np[k] = v.cpu().numpy()
-                else:
-                    weights_np[k] = np.array(v)
+                    v = v.cpu().numpy()
+
+                # int/float → numpy array
+                if np.isscalar(v):
+                    v = np.array(v)
+
+                weights_np[k] = v
+
             weights_list.append(weights_np)
 
-        # Select aggregation function
-        if not agg_weights or (len(agg_weights) > 0 and all(abs(agg_weights[i] - agg_weights[0]) < 1e-6 for i in range(len(agg_weights)))):
+        # ----------------------------------------------------------
+        # Select aggregation method
+        # ----------------------------------------------------------
+        if not agg_weights or (
+            len(agg_weights) > 0 and all(abs(agg_weights[i] - agg_weights[0]) < 1e-6
+                                        for i in range(len(agg_weights)))
+        ):
             print("\n🟢 Using FedAvg aggregation.")
             aggregated_model_params = self.fed_avg(weights_list)
         else:
             print("\n🟡 Using Weighted FedAvg aggregation.")
-            print("Aggregation Weights :", agg_weights)
+            print("Aggregation Weights:", agg_weights)
             aggregated_model_params = self.weighted_fed_avg(weights_list, agg_weights)
+
         self.global_model.load_state_dict(copy.deepcopy(aggregated_model_params))
 
     def cal_min_max_agg_weight(self, client_iid_measure_list):
@@ -347,10 +390,16 @@ class Server:
         return torch.load(buf, map_location=map_location)
     
     def send_global_model_to_client(self, client_id, client_api_url, global_state_dict):
-        # Serialize global model to bytes
         global_model_bytes = self.serialize_state_dict(global_state_dict)
+        print(f"Serialized global model size (MB): {len(global_model_bytes)/1e6:.2f}")
 
-        channel = grpc.insecure_channel(client_api_url)
+        channel = grpc.insecure_channel(
+            client_api_url,
+            options=[
+                ('grpc.max_send_message_length', 500 * 1024 * 1024),
+                ('grpc.max_receive_message_length', 500 * 1024 * 1024),
+            ]
+        )
         stub = ClientgRPC_pb2_grpc.ClientServiceStub(channel)
 
         request = ClientgRPC_pb2.ReceiveGlobalModelRequest(
@@ -359,9 +408,57 @@ class Server:
         )
 
         response = stub.ReceiveGlobalModel(request)
+        print(f"✓ Sent global model to Client {client_id}")
 
-        # response contains client_model + training_time + iid_measure
-        return response.client_model, response.training_time, response.iid_measure
+    
+    def start_client_local_training(self, client_id, client_api_url):
+        channel = grpc.insecure_channel(
+            client_api_url,
+            options=[
+                ('grpc.max_send_message_length', 500 * 1024 * 1024),
+                ('grpc.max_receive_message_length', 500 * 1024 * 1024),
+            ]
+        )
+        stub = ClientgRPC_pb2_grpc.ClientServiceStub(channel)
+
+        request = ClientgRPC_pb2.StartLocalTrainingRequest(
+            client_id=client_id
+        )
+        response = stub.StartLocalTraining(request)
+        print(f"✓ Started local training for Client {client_id}")
+
+    def get_client_updates(self, client_id, client_api_url):
+        channel = grpc.insecure_channel(
+            client_api_url,
+            options=[
+                ('grpc.max_send_message_length', 500 * 1024 * 1024),
+                ('grpc.max_receive_message_length', 500 * 1024 * 1024),
+            ]
+        )
+        stub = ClientgRPC_pb2_grpc.ClientServiceStub(channel)
+
+        request = ClientgRPC_pb2.GetClientsTrainedModelRequest(
+            client_id=client_id
+        )
+        response = stub.GetClientsTrainedModel(request)
+        client_model = self.deserialize_state_dict(response.trained_model, map_location=self.device)
+        return client_model, response.training_time
+    
+    def get_client_iid_measure(self, client_id, client_api_url):
+        channel = grpc.insecure_channel(
+            client_api_url,
+            options=[
+                ('grpc.max_send_message_length', 500 * 1024 * 1024),
+                ('grpc.max_receive_message_length', 500 * 1024 * 1024),
+            ]
+        )
+        stub = ClientgRPC_pb2_grpc.ClientServiceStub(channel)
+
+        request = ClientgRPC_pb2.GetIIDMeasureRequest(
+            client_id=client_id
+        )
+        response = stub.GetIIDMeasure(request)
+        return response.iid_measure
 
     # ============================================================
     # Federated Learning Coordinator
@@ -371,33 +468,19 @@ class Server:
         total_training_start = time.time()
         rng = np.random.default_rng(42)
 
-        # IID Based Aggregation Weights
-        if self.fl_accuracy["selected_algorithm"] == "(1-JSD)":
-            print("Calculating IID Aggregation Weights")
-            for cid in self.fl_train_config["clients_ids"]:
-                client_send_iid_measure_url = self.clients["client_api_urls"][cid] + "/send/iid-measure"
-                iid_agg_weights = []
-                try:
-                    response = requests.get(
-                        client_send_iid_measure_url,
-                        json={"selected_algorithm": self.fl_accuracy["selected_algorithm"]},
-                        timeout=None
-                    )
-                    response.raise_for_status()
-                    iid_measure_result = response.json()
-                    iid_agg_weight = iid_measure_result['iid_agg_weights']
-                    iid_agg_weights_cal_time = iid_measure_result['iid_agg_weights_cal_time']
-                    iid_agg_weights.append(iid_agg_weight)
-                    self.history["iid_agg_weights_cal_time"].append(iid_agg_weights_cal_time)
-                    print(f"✓ Received IID measure from Client {cid}")
-                except Exception as e:
-                    print(f"Failed to receive IID measure from Client {cid}: {e}")
+        # Get clients iid measure
+        if self.fl_accuracy["selected_algorithm"] == "(1-JSD)" or self.fl_accuracy["selected_algorithm"] == "AccuracyBased(1-JSD)" or self.fl_accuracy["selected_algorithm"] == "SEBW" or self.fl_accuracy["selected_algorithm"] == "AccuracyBased_SEBW":
+            print("\nGetting IID Measures from selected clients...")
+            iid_agg_weights_cal_time = time.time()
+            iid_agg_weights = []
+            for cid in self.clients["clients_ids"]:
+                iid_measure = self.get_client_iid_measure(cid, self.clients["client_api_urls"][cid])
+                iid_agg_weights.append(iid_measure)
+            iid_agg_weights_cal_time = time.time() - iid_agg_weights_cal_time
+            self.history["total_iid_agg_weights_cal_time"] = iid_agg_weights_cal_time
             print("IID Aggregation Weights: ", iid_agg_weights)
         else:
             iid_agg_weights = None
-            iid_agg_weights_cal_time = 0.0
-
-
 
         # Federated Learning Rounds
         for fl_round in range(self.fl_train_config["fl_rounds"]):
@@ -409,40 +492,49 @@ class Server:
             self.clients["selected_clients_ids"] = list(selected_clients)
             self.clients["selected_clients_models"] = {cid: [] for cid in selected_clients}
 
-            # Serialize global model
-            model_size_bytes = self.cal_size(self.global_model)
-            self.history["global_model_size_bytes"].append(model_size_bytes)
-            print(f"Global model size: {model_size_bytes / 1e6:.4f} MB")
-
+            # Reset round communication times
+            self.clients["selected_clients_models"] = []
             round_global_send_time = 0.0
             round_local_train_time = 0.0
-            round_global_recv_time = 0.0
+            round_client_model_recv_time = 0.0
+            round_client_training_start_time = 0.0
 
             print(f"Selected clients: {selected_clients}")
 
             for cid in selected_clients:
                 print(f"{'='*80}\nClient {cid} Local Training\n{'='*80}")
 
+                # Send global model to client
+                send_start_time = time.time()
+                self.send_global_model_to_client(cid, self.clients["client_api_urls"][cid], self.global_model.state_dict())
+                send_time = time.time() - send_start_time
+                round_global_send_time += send_time
 
-                client_model_params, training_time, iid_agg_measure = self.send_global_model_to_client(cid, self.clients["client_api_urls"][cid], self.global_model.state_dict())
-                self.clients["selected_clients_models"][cid].append(self.deserialize_model(client_model_params))
-                round_local_train_time = round_local_train_time + training_time
-
-                if iid_agg_weights is not None:
-                    iid_agg_weights[cid] = iid_agg_measure
-                print(f"✓ Received trained model from Client {cid}")
+                # Start local training on client
+                recv_start_time = time.time()
+                self.start_client_local_training(cid, self.clients["client_api_urls"][cid])
+                recv_time = time.time() - recv_start_time
+                round_client_training_start_time += recv_time
+                
+                # Get client updates
+                recv_time = time.time()
+                client_model_params, training_time = self.get_client_updates(cid, self.clients["client_api_urls"][cid])
+                round_client_model_recv_time += time.time() - recv_time
+                self.clients["selected_clients_models"].append(client_model_params)
+                round_local_train_time += training_time
                 
             # Record communication times
             self.history["round_global_model_send_time"].append(round_global_send_time)
-            self.history["round_client_model_recv_time"].append(round_global_recv_time)
+            self.history["round_client_model_recv_time"].append(round_client_model_recv_time)
             self.history["round_local_training_time"].append(round_local_train_time)
-            self.history["round_communication_time"].append(round_global_send_time + round_global_recv_time)
+            self.history["round_communication_time"].append(round_global_send_time + round_client_model_recv_time)
             
 
             # Accuracy Based Aggregation Weights
             acc_based_agg_weights = []
             if self.fl_accuracy["selected_algorithm"] == "AccuracyBased" or self.fl_accuracy["selected_algorithm"] == "AccuracyBased(1-JSD)" or self.fl_accuracy["selected_algorithm"] == "AccuracyBased_SEBW":
                 print("Calculating Accuracy Based Aggregation Weights")
+                acc_based_agg_weights_cal_time = time.time()
                 for cid in selected_clients:
                     test_client_model_params = self.clients["selected_clients_models"][cid]
                     for t_cid in selected_clients:
@@ -465,8 +557,13 @@ class Server:
                             print(f"✓ Received Accuracy Based measure from Client {cid}")
                         except Exception as e:
                             print(f"Failed to receive Accuracy Based measure from Client {cid}: {e}")
+
+                acc_based_agg_weights_cal_time = time.time() - acc_based_agg_weights_cal_time
             else:
                 acc_based_agg_weights = None
+                acc_based_agg_weights_cal_time = 0.0
+            self.history["acc_based_agg_weights_cal_time"].append(acc_based_agg_weights_cal_time)
+            self.history["round_communication_time"][-1] += acc_based_agg_weights_cal_time
                         
             # Get Aggregation Weights
             if iid_agg_weights and acc_based_agg_weights:
@@ -477,8 +574,8 @@ class Server:
                 ]
                 print("Combined Weights: ", client_agg_weights)
             elif iid_agg_weights:
-                print("IID Measure Weights: ", iid_agg_weights)
                 client_agg_weights = [iid_agg_weights[cid] for cid in selected_clients]
+                print("IID Measure Weights: ", client_agg_weights)
             elif acc_based_agg_weights:
                 print("Accuracy Based Weight: ", acc_based_agg_weights)
                 client_agg_weights = [acc_based_agg_weights[i] for i in range(len(selected_clients))]
@@ -487,11 +584,13 @@ class Server:
 
             # Aggregate Models
             agg_start_time = time.time()
-            self.aggregate_models(selected_clients, client_agg_weights)
+            self.aggregate_models(self.clients["selected_clients_models"], client_agg_weights)
             agg_time = time.time() - agg_start_time
             self.history["round_aggregation_time"].append(agg_time)
+            print(f"✓ Aggregated client models in {agg_time:.2f} seconds.")
 
             # Evaluate Global Model
+            print("Evaluating global model...")
             acc, loss = self.test_model()
             self.history["global_accuracy"].append(acc)
             self.history["global_loss"].append(loss)
@@ -500,8 +599,15 @@ class Server:
             system_usage = self.get_system_usage(self.device)
             self.history["system_usage"].append(system_usage)
 
-            print(f"Round {fl_round+1}: Accuracy={acc:.2f}%, Loss={loss:.4f}")
+            print(f"\n=============== Round {fl_round + 1} Summary ===============")
+            print(f"Round {fl_round+1}: Global Model: Accuracy={acc:.2f}%, Loss={loss:.4f}")
+            print(f"Round {fl_round+1}: FL Round Total Time={round_time:.2f} seconds")
+            print(f"Round {fl_round+1}: Total Clients Training Time={round_local_train_time:.2f} seconds")
+            print(f"Round {fl_round+1}: Round Communication Time={self.history['round_communication_time'][-1]:.2f} seconds")
+            print("===============================================================")
 
+            # Log to WANDB
+            print(f"Logging to wandb...")
             wandb.log({
                 "fl_rounds": fl_round + 1,
                 "global_accuracy": acc,
@@ -511,6 +617,8 @@ class Server:
                 "round_client_model_recv_time": self.history["round_client_model_recv_time"][-1],
                 "round_local_training_time": self.history["round_local_training_time"][-1],
                 "round_aggregation_time": self.history["round_aggregation_time"][-1],
+                "iid_agg_weights_calc_time": self.history["iid_agg_weights_calc_time"],
+                "acc_based_agg_weights_cal_time": self.history["acc_based_agg_weights_cal_time"][-1],
                 "round_dequantization_time": 0,
                 "round_total_time": self.history["fl_train_time"][-1],
                 "cpu_percent": system_usage["cpu_percent"],
