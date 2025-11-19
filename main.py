@@ -37,18 +37,18 @@ from server.Server import Server
 # ----------------- Configuration -----------------
 # gRPC max message sizes (bytes) - increase because model state_dicts can be large
 MAX_MESSAGE_LENGTH = 500 * 1024 * 1024  # 500 MB
-FL_ROUNDS = 150
+FL_ROUNDS = 300
 LOCAL_EPOCHS = 1
 NUM_CLIENTS = 20
 NUM_SELECTED_CLIENTS = 2
-DATASET_PARTITIONER_MAX_CLASS_PER_CLIENT = 10
+DATASET_PARTITIONER_MAX_CLASS_PER_CLIENT = 6
 DATASET_PARTITIONER_SEED = 42
-IS_USE_FULL_DATASET = True
+IS_USE_FULL_DATASET = False
 SELECTED_MODEL = "VGG"  # "VGG" or "NormalCNN"
-SELECTED_ALGORITHM = "(1-JSD)"
+SELECTED_ALGORITHM = "FedAvg"  # FedAvg, (1-JSD), ClientSize(1-JSD), AccuracyBased, AccuracyBased(1-JSD), SEBW, AccuracyBased_SEBW, FedProx, CAFA
 FEDPROX_MU = 0.0
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-RESULTS_SAVE_PATH = './history'
+RESULTS_SAVE_PATH = '/content/drive/MyDrive/Final_Implementations/FL_Experiments'
 RESULTS_DIR = os.path.join(RESULTS_SAVE_PATH, "FL_Results")
 BATCH_SIZE = 64
 SERVER_HOST = 'localhost'
@@ -197,7 +197,7 @@ def server_serve():
     # 🧭 Initialize wandb
     wandb.login(key="cca506f824e9db910b7b4a407afc0b36ba655c28")
     wandb.init(
-        project=f"FL-Test_0",
+        project=f"FL-Test_gRPC_1",
         config={
             "model": SELECTED_MODEL,
             "fl_rounds": FL_ROUNDS,
