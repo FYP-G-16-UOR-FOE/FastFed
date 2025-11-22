@@ -37,11 +37,11 @@ from server.Server import Server
 # ----------------- Configuration -----------------
 # gRPC max message sizes (bytes) - increase because model state_dicts can be large
 MAX_MESSAGE_LENGTH = 500 * 1024 * 1024  # 500 MB
-FL_ROUNDS = 300
-LOCAL_EPOCHS = 1
+FL_ROUNDS = 150
+LOCAL_EPOCHS = 4
 NUM_CLIENTS = 20
-NUM_SELECTED_CLIENTS = 2
-DATASET_PARTITIONER_MAX_CLASS_PER_CLIENT = 6
+NUM_SELECTED_CLIENTS = 10
+DATASET_PARTITIONER_MAX_CLASS_PER_CLIENT = 10
 DATASET_PARTITIONER_SEED = 42
 IS_USE_FULL_DATASET = False
 SELECTED_MODEL = "VGG"  # "VGG" or "NormalCNN"
