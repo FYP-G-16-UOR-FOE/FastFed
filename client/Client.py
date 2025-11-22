@@ -35,6 +35,7 @@ class Client:
         self.batch_size = batch_size
         self.device = device
         self.client_model = model
+        self.client_model.to(self.device)  # Move model to device (CPU or CUDA)
         self.local_training_details = {
             "train_times": [],
             "train_accuracies": [],
@@ -70,6 +71,7 @@ class Client:
 
     def receive_global_model(self, state_dict):
         self.client_model.load_state_dict(state_dict, strict=True)
+        self.client_model.to(self.device)
 
     def start_client_local_training(self):
         self.train_client_model()
@@ -182,6 +184,9 @@ class Client:
         # FedProx
         if self.client_train_config["selected_algorithm"] == "FedProx":
             global_model_params = copy.deepcopy(self.client_model.state_dict())
+            # Move each param tensor to device if needed
+            for key in global_model_params:
+                global_model_params[key] = global_model_params[key].to(self.device)
         self.client_model.train()
         train_time = time.time() 
 
