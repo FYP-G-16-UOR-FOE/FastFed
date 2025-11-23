@@ -406,7 +406,7 @@ class Server:
             )
 
             # Send the model in chunks
-            chunk_size = 64 * 1024  # 64 KB
+            chunk_size = 1024*1024  # 1 MB
             for i in range(0, len(global_model_bytes), chunk_size):
                 chunk = global_model_bytes[i:i+chunk_size]
                 yield ClientgRPC_pb2.ReceiveGlobalModelRequest(global_model=chunk)
@@ -497,7 +497,7 @@ class Server:
             )
 
             # Send the model in chunks
-            chunk_size = 64 * 1024  # 64 KB
+            chunk_size = 1024*1024  # 1 MB
             for i in range(0, len(client_model_bytes), chunk_size):
                 chunk = client_model_bytes[i:i+chunk_size]
                 yield ClientgRPC_pb2.AccuracyBasedMeasureRequest(model=chunk)
