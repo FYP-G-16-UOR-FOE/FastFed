@@ -7,8 +7,8 @@ from concurrent import futures
 
 import grpc
 import torch
-
 import wandb
+
 from client.Client import Client
 from client.ClientServicer import ClientServicer
 from dataset_partitioner.DatasetPartitioner import DatasetPartitioner

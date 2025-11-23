@@ -48,7 +48,7 @@ class ClientServicer(ClientgRPC_pb2_grpc.ClientServiceServicer):
                 training_time=training_time
             )
 
-            chunk_size = 1024*1024  # 1 MB
+            chunk_size = 5*1024*1024  # 1 MB
             for i in range(0, len(model_bytes), chunk_size):
                 yield ClientgRPC_pb2.GetClientsTrainedModelResponse(
                     trained_model=model_bytes[i:i+chunk_size]
