@@ -15,12 +15,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
-import wandb
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
+import wandb
 from gRPC import ClientgRPC_pb2, ClientgRPC_pb2_grpc
 
 torch.backends.cudnn.benchmark = True
@@ -406,7 +406,7 @@ class Server:
             )
 
             # Send the model in chunks
-            chunk_size = 5*1024*1024  # 1 MB
+            chunk_size = 1*1024*1024  # 1 MB
             for i in range(0, len(global_model_bytes), chunk_size):
                 chunk = global_model_bytes[i:i+chunk_size]
                 yield ClientgRPC_pb2.ReceiveGlobalModelRequest(global_model=chunk)
@@ -485,7 +485,7 @@ class Server:
             )
 
             # Send the model in chunks
-            chunk_size = 5*1024*1024  # 1 MB
+            chunk_size = 1*1024*1024  # 1 MB
             for i in range(0, len(client_model_bytes), chunk_size):
                 chunk = client_model_bytes[i:i+chunk_size]
                 yield ClientgRPC_pb2.AccuracyBasedMeasureRequest(model=chunk)
