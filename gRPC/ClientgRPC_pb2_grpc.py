@@ -34,7 +34,7 @@ class ClientServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.ReceiveGlobalModel = channel.unary_unary(
+        self.ReceiveGlobalModel = channel.stream_unary(
                 '/fl_client.ClientService/ReceiveGlobalModel',
                 request_serializer=gRPC_dot_ClientgRPC__pb2.ReceiveGlobalModelRequest.SerializeToString,
                 response_deserializer=gRPC_dot_ClientgRPC__pb2.StatusResponse.FromString,
@@ -44,7 +44,7 @@ class ClientServiceStub(object):
                 request_serializer=gRPC_dot_ClientgRPC__pb2.StartLocalTrainingRequest.SerializeToString,
                 response_deserializer=gRPC_dot_ClientgRPC__pb2.StatusResponse.FromString,
                 _registered_method=True)
-        self.GetClientsTrainedModel = channel.unary_unary(
+        self.GetClientsTrainedModel = channel.unary_stream(
                 '/fl_client.ClientService/GetClientsTrainedModel',
                 request_serializer=gRPC_dot_ClientgRPC__pb2.GetClientsTrainedModelRequest.SerializeToString,
                 response_deserializer=gRPC_dot_ClientgRPC__pb2.GetClientsTrainedModelResponse.FromString,
@@ -54,7 +54,7 @@ class ClientServiceStub(object):
                 request_serializer=gRPC_dot_ClientgRPC__pb2.GetIIDMeasureRequest.SerializeToString,
                 response_deserializer=gRPC_dot_ClientgRPC__pb2.GetIIDMeasureResponse.FromString,
                 _registered_method=True)
-        self.ReceiveModelForAccuracyBasedMeasure = channel.unary_unary(
+        self.ReceiveModelForAccuracyBasedMeasure = channel.stream_unary(
                 '/fl_client.ClientService/ReceiveModelForAccuracyBasedMeasure',
                 request_serializer=gRPC_dot_ClientgRPC__pb2.AccuracyBasedMeasureRequest.SerializeToString,
                 response_deserializer=gRPC_dot_ClientgRPC__pb2.AccuracyBasedMeasureResponse.FromString,
@@ -64,7 +64,7 @@ class ClientServiceStub(object):
 class ClientServiceServicer(object):
     """Missing associated documentation comment in .proto file."""
 
-    def ReceiveGlobalModel(self, request, context):
+    def ReceiveGlobalModel(self, request_iterator, context):
         """1. Receive global model from server
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -92,7 +92,7 @@ class ClientServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
-    def ReceiveModelForAccuracyBasedMeasure(self, request, context):
+    def ReceiveModelForAccuracyBasedMeasure(self, request_iterator, context):
         """5. Receive model for accuracy-based measurement
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -102,7 +102,7 @@ class ClientServiceServicer(object):
 
 def add_ClientServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'ReceiveGlobalModel': grpc.unary_unary_rpc_method_handler(
+            'ReceiveGlobalModel': grpc.stream_unary_rpc_method_handler(
                     servicer.ReceiveGlobalModel,
                     request_deserializer=gRPC_dot_ClientgRPC__pb2.ReceiveGlobalModelRequest.FromString,
                     response_serializer=gRPC_dot_ClientgRPC__pb2.StatusResponse.SerializeToString,
@@ -112,7 +112,7 @@ def add_ClientServiceServicer_to_server(servicer, server):
                     request_deserializer=gRPC_dot_ClientgRPC__pb2.StartLocalTrainingRequest.FromString,
                     response_serializer=gRPC_dot_ClientgRPC__pb2.StatusResponse.SerializeToString,
             ),
-            'GetClientsTrainedModel': grpc.unary_unary_rpc_method_handler(
+            'GetClientsTrainedModel': grpc.unary_stream_rpc_method_handler(
                     servicer.GetClientsTrainedModel,
                     request_deserializer=gRPC_dot_ClientgRPC__pb2.GetClientsTrainedModelRequest.FromString,
                     response_serializer=gRPC_dot_ClientgRPC__pb2.GetClientsTrainedModelResponse.SerializeToString,
@@ -122,7 +122,7 @@ def add_ClientServiceServicer_to_server(servicer, server):
                     request_deserializer=gRPC_dot_ClientgRPC__pb2.GetIIDMeasureRequest.FromString,
                     response_serializer=gRPC_dot_ClientgRPC__pb2.GetIIDMeasureResponse.SerializeToString,
             ),
-            'ReceiveModelForAccuracyBasedMeasure': grpc.unary_unary_rpc_method_handler(
+            'ReceiveModelForAccuracyBasedMeasure': grpc.stream_unary_rpc_method_handler(
                     servicer.ReceiveModelForAccuracyBasedMeasure,
                     request_deserializer=gRPC_dot_ClientgRPC__pb2.AccuracyBasedMeasureRequest.FromString,
                     response_serializer=gRPC_dot_ClientgRPC__pb2.AccuracyBasedMeasureResponse.SerializeToString,
@@ -139,7 +139,7 @@ class ClientService(object):
     """Missing associated documentation comment in .proto file."""
 
     @staticmethod
-    def ReceiveGlobalModel(request,
+    def ReceiveGlobalModel(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -149,8 +149,8 @@ class ClientService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
+        return grpc.experimental.stream_unary(
+            request_iterator,
             target,
             '/fl_client.ClientService/ReceiveGlobalModel',
             gRPC_dot_ClientgRPC__pb2.ReceiveGlobalModelRequest.SerializeToString,
@@ -203,7 +203,7 @@ class ClientService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
+        return grpc.experimental.unary_stream(
             request,
             target,
             '/fl_client.ClientService/GetClientsTrainedModel',
@@ -247,7 +247,7 @@ class ClientService(object):
             _registered_method=True)
 
     @staticmethod
-    def ReceiveModelForAccuracyBasedMeasure(request,
+    def ReceiveModelForAccuracyBasedMeasure(request_iterator,
             target,
             options=(),
             channel_credentials=None,
@@ -257,8 +257,8 @@ class ClientService(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
+        return grpc.experimental.stream_unary(
+            request_iterator,
             target,
             '/fl_client.ClientService/ReceiveModelForAccuracyBasedMeasure',
             gRPC_dot_ClientgRPC__pb2.AccuracyBasedMeasureRequest.SerializeToString,

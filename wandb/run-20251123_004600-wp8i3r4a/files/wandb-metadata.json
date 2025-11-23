@@ -1,0 +1,37 @@
+{
+  "os": "macOS-14.5-arm64-arm-64bit",
+  "python": "CPython 3.12.1",
+  "startedAt": "2025-11-22T19:16:00.984672Z",
+  "program": "/Users/jaanumacbook/Programming Save Folder/FYP/FastFed/main.py",
+  "codePath": "main.py",
+  "codePathLocal": "main.py",
+  "git": {
+    "remote": "https://github.com/FYP-G-16-UOR-FOE/FastFed.git",
+    "commit": "0962d6320503f3e7a6f7af8136c1f33a585d729c"
+  },
+  "email": "sjanugopanstudy@gmail.com",
+  "root": "/Users/jaanumacbook/Programming Save Folder/FYP/FastFed",
+  "host": "Sundaramoorthys-MacBook-Air.local",
+  "executable": "/Users/jaanumacbook/Programming Save Folder/FYP/FastFed/.venv/bin/python3",
+  "cpu_count": 8,
+  "cpu_count_logical": 8,
+  "disk": {
+    "/": {
+      "total": "245107195904",
+      "used": "217897439232"
+    }
+  },
+  "memory": {
+    "total": "8589934592"
+  },
+  "apple": {
+    "name": "Apple M2",
+    "ecpuCores": 4,
+    "pcpuCores": 4,
+    "gpuCores": 10,
+    "memoryGb": 8,
+    "swapTotalBytes": "7516192768",
+    "ramTotalBytes": "8589934592"
+  },
+  "writerId": "kdq9jzomg0ysk2131wsvomkjvynbrq0r"
+}
