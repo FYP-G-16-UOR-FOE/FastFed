@@ -1,214 +1,62 @@
-"""
-Corrected federated learning gRPC server+client runner
-- Moves side-effect code out of class bodies
-- Runs server FL loop after gRPC server is started (in background thread)
-- Serializes model state_dict to bytes for sending over gRPC
-- Uses deepcopy for per-client model copies
-- Uses multiprocessing spawn start method to avoid CUDA reinit issues
-- Adds retries/wait for server when clients register
-
-Assumes the generated protobuf modules exist and that message fields for model bytes
-are declared as `bytes` in the proto (e.g. `bytes client_model = 3;`).
-"""
-
 import copy
-import io
 import multiprocessing
-import os
 import sys
 import threading
 import time
 from concurrent import futures
-from typing import List
 
 import grpc
 import torch
 
 import wandb
-# Local imports (assumed present)
 from client.Client import Client
+from client.ClientServicer import ClientServicer
 from dataset_partitioner.DatasetPartitioner import DatasetPartitioner
 from gRPC import (ClientgRPC_pb2, ClientgRPC_pb2_grpc, ServergRPC_pb2,
                   ServergRPC_pb2_grpc)
 from models.NormalCNN import NormalCNN
 from models.VGG import VGG
-from server.Server import Server
-
-# ----------------- Configuration -----------------
-# gRPC max message sizes (bytes) - increase because model state_dicts can be large
-MAX_MESSAGE_LENGTH = 500 * 1024 * 1024  # 500 MB
-FL_ROUNDS = 150
-LOCAL_EPOCHS = 4
-NUM_CLIENTS = 20
-NUM_SELECTED_CLIENTS = 10
-DATASET_PARTITIONER_MAX_CLASS_PER_CLIENT = 10
-DATASET_PARTITIONER_SEED = 42
-IS_USE_FULL_DATASET = False
-SELECTED_MODEL = "VGG"  # "VGG" or "NormalCNN"
-SELECTED_ALGORITHM = "FedAvg"  # FedAvg, (1-JSD), ClientSize(1-JSD), AccuracyBased, AccuracyBased(1-JSD), SEBW, AccuracyBased_SEBW, FedProx, CAFA
-FEDPROX_MU = 0.0
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-RESULTS_SAVE_PATH = '/content/drive/MyDrive/Final_Implementations/FL_Experiments'
-RESULTS_DIR = os.path.join(RESULTS_SAVE_PATH, "FL_Results")
-BATCH_SIZE = 64
-SERVER_HOST = 'localhost'
-SERVER_PORT = 50051
-CLIENT_BASE_PORT = 60000
-
-# ----------------- Helpers -----------------
-
-def serialize_state_dict(state_dict) -> bytes:
-    buf = io.BytesIO()
-    # save CPU tensors to avoid CUDA device issues during load
-    cpu_state = {k: v.cpu() for k, v in state_dict.items()}
-    torch.save(cpu_state, buf)
-    return buf.getvalue()
-
-
-def deserialize_state_dict(b: bytes, map_location=None):
-    buf = io.BytesIO(b)
-    return torch.load(buf, map_location=map_location)
-
-# ----------------- Server Servicer -----------------
-class ServerServicer(ServergRPC_pb2_grpc.ServerServiceServicer):
-    def __init__(self):
-        # initialize server object used for FL logic
-        if SELECTED_MODEL == "NormalCNN":
-            global_model = NormalCNN().to(DEVICE)
-        else:
-            global_model = VGG("VGG19").to(DEVICE)
-
-        self.server = Server(
-            global_model=global_model,
-            device=DEVICE,
-            model_type=SELECTED_MODEL,
-            fl_rounds=FL_ROUNDS,
-            local_epochs=LOCAL_EPOCHS,
-            num_clients=NUM_CLIENTS,
-            num_selected_clients=NUM_SELECTED_CLIENTS,
-            results_save_dir=RESULTS_DIR,
-            selected_algorithm=SELECTED_ALGORITHM,
-        )
-
-    def RegisterClient(self, request, context):
-        client_id = request.client_id
-        client_api_url = request.client_api_url
-        print(f"[Server] RegisterClient: id={client_id} url={client_api_url}")
-        try:
-            self.server.register_client(client_id, client_api_url)
-            return ServergRPC_pb2.StatusResponse(status="OK")
-        except Exception as e:
-            print("[Server] Error registering client:", e, file=sys.stderr)
-            return ServergRPC_pb2.StatusResponse(status=f"ERROR: {e}")
-
-# ----------------- Client Servicer -----------------
-class ClientServicer(ClientgRPC_pb2_grpc.ClientServiceServicer):
-    def __init__(self, clients: List[Client]):
-        self.clients = clients
-
-    def ReceiveGlobalModel(self, request, context):
-        client_id = request.client_id
-        model_bytes = request.global_model
-        print(f"[ClientServicer] ReceiveGlobalModel for client {client_id}")
-        try:
-            state_dict = deserialize_state_dict(model_bytes, map_location=self.clients[client_id].device)
-            self.clients[client_id].receive_global_model(state_dict)
-            return ClientgRPC_pb2.StatusResponse(status="OK")
-        except Exception as e:
-            print("[Client] Error applying global model:", e, file=sys.stderr)
-            raise e
-        
-    def StartLocalTraining(self, request, context):
-        client_id = request.client_id
-        print(f"[ClientServicer] StartLocalTraining for client {client_id}")
-        try:
-            self.clients[client_id].start_client_local_training()
-            return ClientgRPC_pb2.StatusResponse(status="OK")
-        except Exception as e:
-            print("[Client] Error during local training:", e, file=sys.stderr)
-            raise e
-        
-    def GetClientsTrainedModel(self, request, context):
-        client_id = request.client_id
-        print(f"[ClientServicer] GetClientsTrainedModel for client {client_id}")
-        try:
-            client_model_params, training_time = self.clients[client_id].get_client_updates()
-            trained_model_bytes = serialize_state_dict(client_model_params)
-            return ClientgRPC_pb2.GetClientsTrainedModelResponse(
-                client_id=client_id,
-                trained_model=trained_model_bytes,
-                training_time=training_time
-            )
-        except Exception as e:
-            print("[Client] Error getting trained model:", e, file=sys.stderr)
-            raise e
-        
-    def GetIIDMeasure(self, request, context):
-        client_id = request.client_id
-        print(f"[ClientServicer] GetIIDMeasure for client {client_id}")
-        try:
-            iid_measure = self.clients[client_id].calculate_iid_measure()
-            return ClientgRPC_pb2.GetIIDMeasureResponse(
-                client_id=client_id,
-                iid_measure=iid_measure
-            )
-        except Exception as e:
-            print("[Client] Error calculating IID measure:", e, file=sys.stderr)
-            raise e
-
-    def ReceiveModelForAccuracyBasedMeasure(self, request, context):
-        client_id = request.client_id
-        model_bytes = request.model
-        try:
-            state_dict = deserialize_state_dict(model_bytes, map_location=self.clients[client_id].device)
-            weighted_val_acc = self.clients[client_id].evaluate_state_dict_on_validation_data(state_dict)
-            return ClientgRPC_pb2.AccuracyBasedMeasureResponse(weighted_val_acc=weighted_val_acc)
-        except Exception as e:
-            print("[Client] Error computing accuracy-based measure:", e, file=sys.stderr)
-            raise e
+from server.ServerServicer import ServerServicer
+from utils.ParseArgument import ParseArgument
 
 # ----------------- Server runner -----------------
 
-def server_serve():
-    # create gRPC server with increased message size limits
+def server_serve(config):
     grpc_server = grpc.server(
-        futures.ThreadPoolExecutor(max_workers=10),
-        options=[
-            ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
-            ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
-        ]
+        futures.ThreadPoolExecutor(max_workers=10)
     )
-    servicer = ServerServicer()
+    servicer = ServerServicer(config)
     ServergRPC_pb2_grpc.add_ServerServiceServicer_to_server(servicer, grpc_server)
-    server_address = f"[::]:{SERVER_PORT}"
+    server_address = f"{config['server_host']}:{config['server_port']}"
     grpc_server.add_insecure_port(server_address)
     grpc_server.start()
     print(f"[Server] gRPC server started on {server_address}")
 
-    def wait_until_clients_register(server, n=NUM_CLIENTS):
+    def wait_until_clients_register(server, n):
         while len(server.clients["clients_ids"]) < n:
             print(f"[Server] Waiting for clients... {len(server.clients['clients_ids'])}/{n}")
             time.sleep(1)
 
-    # Run federated learning in a background thread so gRPC can still accept RPCs
     # Wait for client registrations
-    wait_until_clients_register(servicer.server)
+    wait_until_clients_register(servicer.server, config["num_clients"])
 
     # 🧭 Initialize wandb
-    wandb.login(key="cca506f824e9db910b7b4a407afc0b36ba655c28")
+    if config["wandb_key"]:
+        wandb.login(key=config["wandb_key"])
     wandb.init(
-        project=f"FL-Test_gRPC_1",
+        project=config["wandb_project"],
         config={
-            "model": SELECTED_MODEL,
-            "fl_rounds": FL_ROUNDS,
-            "clients": NUM_CLIENTS,
-            "selected_clients": NUM_SELECTED_CLIENTS,
-            "local_epochs": LOCAL_EPOCHS,
+            "model": config["model"],
+            "fl_rounds": config["fl_rounds"],
+            "clients": config["num_clients"],
+            "selected_clients": config["num_selected_clients"],
+            "local_epochs": config["local_epochs"],
             "dataset_distribution": "Realistic Non-IID",
-            "device": str(DEVICE)
+            "device": str(config["device"]),
+            "algorithm": config["algorithm"],
         },
-        name=SELECTED_ALGORITHM
-    )   
+        name=config["algorithm"]
+    )
 
     # Start FL loop
     fl_thread = threading.Thread(target=servicer.server.start_federated_learning, daemon=True)
@@ -223,67 +71,63 @@ def server_serve():
 
 # ----------------- Client runner -----------------
 
-def client_serve(client_start_port=CLIENT_BASE_PORT):
+def client_serve(config):
+    
     # Prepare datasets and client objects (no side-effects in class bodies)
     dataset_partitioner = DatasetPartitioner(
-        n_clients=NUM_CLIENTS,
-        batch_size=BATCH_SIZE,
-        max_class_per_client=DATASET_PARTITIONER_MAX_CLASS_PER_CLIENT,
-        seed=DATASET_PARTITIONER_SEED,
+        n_clients=config["num_clients"],
+        batch_size=config["batch_size"],
+        max_class_per_client=config["max_class_per_client"],
+        seed=config["seed"],
         verbose=True,
     )
     client_datasets, _ = dataset_partitioner.split_cifar10_realworld()
 
     # create deep copies of the base model for each client
-    if SELECTED_MODEL == "NormalCNN":
+    if config["model"] == "NormalCNN":
         base_model = NormalCNN()
     else:
         base_model = VGG("VGG19")
 
     clients = []
-    for i in range(NUM_CLIENTS):
+    for i in range(config["num_clients"]):
         client_model = copy.deepcopy(base_model)
         c = Client(
             id=i,
-            ip_address='127.0.0.1',
-            port=client_start_port,
-            device=DEVICE,
+            ip_address=config["server_host"],
+            port=config["client_base_port"] + i,
+            device=config["device"],
             model=client_model,
             client_dataset=client_datasets[i],
-            batch_size=BATCH_SIZE,
-            selected_algorithm=SELECTED_ALGORITHM,
-            is_use_full_dataset=IS_USE_FULL_DATASET,
-            model_type=SELECTED_MODEL,
-            local_epochs=LOCAL_EPOCHS,
-            fedprox_mu=FEDPROX_MU,
+            batch_size=config["batch_size"],
+            selected_algorithm=config["algorithm"],
+            is_use_full_dataset=config["use_full_dataset"],
+            model_type=config["model"],
+            local_epochs=config["local_epochs"],
+            fedprox_mu=config["fedprox_mu"],
         )
         clients.append(c)
 
-    # Start client-side gRPC server so server can call back (optional depending on architecture)
-    # create gRPC server with increased message size limits
-    grpc_server = grpc.server(
-        futures.ThreadPoolExecutor(max_workers=10),
-        options=[
-            ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
-            ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
-        ]
-    )
-    servicer = ClientServicer(clients)
-    ClientgRPC_pb2_grpc.add_ClientServiceServicer_to_server(servicer, grpc_server)
-    client_server_port = client_start_port
-    client_address = f"[::]:{client_server_port}"
-    grpc_server.add_insecure_port(client_address)
-    grpc_server.start()
-    print(f"[Client] Client gRPC server started on {client_address}")
+    # Start gRPC servers for each client
+    grpc_servers = []
 
-    # Register clients with the central server (retry until server available)
-    # create channel to server with increased message size limits
+    for client in clients:
+        grpc_server = grpc.server(
+            futures.ThreadPoolExecutor(max_workers=10),
+        )
+        servicer = ClientServicer(client)
+        ClientgRPC_pb2_grpc.add_ClientServiceServicer_to_server(servicer, grpc_server)
+
+        client_address = f"{client.ip_address}:{client.port}"
+        grpc_server.add_insecure_port(client_address)
+        grpc_server.start()
+        grpc_servers.append(grpc_server)
+
+        print(f"[Client-{client.id}] gRPC server started on {client_address}")
+
+    # Register clients with the central server
     server_channel = grpc.insecure_channel(
-        f"{SERVER_HOST}:{SERVER_PORT}",
-        options=[
-            ('grpc.max_send_message_length', MAX_MESSAGE_LENGTH),
-            ('grpc.max_receive_message_length', MAX_MESSAGE_LENGTH),
-        ]
+        f"{config['server_host']}:{config['server_port']}",
     )
     stub = ServergRPC_pb2_grpc.ServerServiceStub(server_channel)
 
@@ -291,7 +135,6 @@ def client_serve(client_start_port=CLIENT_BASE_PORT):
         attempt = 0
         while True:
             try:
-                # provide a callback URL or port so the server can reach back if needed
                 client_api_url = f"{client.ip_address}:{client.port}"
                 req = ServergRPC_pb2.ClientRegistrationRequest(client_id=client.id, client_api_url=client_api_url)
                 resp = stub.RegisterClient(req)
@@ -303,7 +146,7 @@ def client_serve(client_start_port=CLIENT_BASE_PORT):
                     print(f"[Client] Failed to register client {client.id} after {attempt} attempts: {e}", file=sys.stderr)
                     break
                 print(f"[Client] Waiting for server to be ready... (attempt {attempt})")
-                time.sleep(1.0)
+                time.sleep(2)
 
     try:
         grpc_server.wait_for_termination()
@@ -313,7 +156,7 @@ def client_serve(client_start_port=CLIENT_BASE_PORT):
 
 # ----------------- Entrypoint -----------------
 
-def serve():
+def serve(config):
     # Use spawn on platforms where CUDA or torch interactions are sensitive
     try:
         multiprocessing.set_start_method('spawn')
@@ -321,12 +164,12 @@ def serve():
         # already set
         pass
 
-    p_server = multiprocessing.Process(target=server_serve)
-    p_client = multiprocessing.Process(target=client_serve)
+    p_server = multiprocessing.Process(target=server_serve, args=(config,))
+    p_client = multiprocessing.Process(target=client_serve, args=(config,))
 
     p_server.start()
     # small sleep to increase chance server is listening before clients attempt registration
-    time.sleep(1.0)
+    time.sleep(2.0)
     p_client.start()
 
     try:
@@ -339,4 +182,25 @@ def serve():
 
 
 if __name__ == '__main__':
-    serve()
+    args = ParseArgument.parse_arguments()
+    config = {
+        "model": args.model,
+        "algorithm": args.algorithm,
+        "fl_rounds": args.fl_rounds,
+        "local_epochs": args.local_epochs,
+        "num_clients": args.num_clients,
+        "num_selected_clients": args.num_selected_clients,
+        "batch_size": args.batch_size,
+        "fedprox_mu": args.fedprox_mu,
+        "max_class_per_client": args.max_class_per_client,
+        "use_full_dataset": args.use_full_dataset,
+        "device": torch.device(args.device),
+        "server_host": args.server_host,
+        "server_port": args.server_port,
+        "client_base_port": args.client_base_port,
+        "results_dir": args.results_dir,
+        "wandb_project": args.wandb_project,
+        "wandb_key": args.wandb_key,
+        "seed": args.seed,
+    }
+    serve(config)

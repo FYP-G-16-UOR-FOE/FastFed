@@ -4,19 +4,19 @@ package fl_client;
 
 service ClientService {
   // 1. Receive global model from server
-  rpc ReceiveGlobalModel(ReceiveGlobalModelRequest) returns (StatusResponse);
+  rpc ReceiveGlobalModel(stream ReceiveGlobalModelRequest) returns (StatusResponse);
 
   // 2. Start local client training
   rpc StartLocalTraining(StartLocalTrainingRequest) returns (StatusResponse);
 
   // 3. Get Clients Trained Model
-  rpc GetClientsTrainedModel(GetClientsTrainedModelRequest) returns (GetClientsTrainedModelResponse);
+  rpc GetClientsTrainedModel(GetClientsTrainedModelRequest) returns (stream GetClientsTrainedModelResponse);
 
   // 4. Get IID measure
   rpc GetIIDMeasure(GetIIDMeasureRequest) returns (GetIIDMeasureResponse);
 
   // 5. Receive model for accuracy-based measurement
-  rpc ReceiveModelForAccuracyBasedMeasure(AccuracyBasedMeasureRequest) returns (AccuracyBasedMeasureResponse);
+  rpc ReceiveModelForAccuracyBasedMeasure(stream AccuracyBasedMeasureRequest) returns (AccuracyBasedMeasureResponse);
 }
 
 message ReceiveGlobalModelRequest {

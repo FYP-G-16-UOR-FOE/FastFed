@@ -390,25 +390,32 @@ class Server:
         return torch.load(buf, map_location=map_location)
     
     def send_global_model_to_client(self, client_id, client_api_url, global_state_dict):
+        # Serialize model
         global_model_bytes = self.serialize_state_dict(global_state_dict)
         print(f"Serialized global model size (MB): {len(global_model_bytes)/1e6:.2f}")
 
-        channel = grpc.insecure_channel(
-            client_api_url,
-            options=[
-                ('grpc.max_send_message_length', 500 * 1024 * 1024),
-                ('grpc.max_receive_message_length', 500 * 1024 * 1024),
-            ]
-        )
+        # Prepare the GRPC client
+        channel = grpc.insecure_channel(client_api_url)
         stub = ClientgRPC_pb2_grpc.ClientServiceStub(channel)
 
-        request = ClientgRPC_pb2.ReceiveGlobalModelRequest(
-            client_id=client_id,
-            global_model=global_model_bytes
-        )
+        # ---- Generator for streaming data ----
+        def request_generator():
+            # First send metadata (client ID)
+            yield ClientgRPC_pb2.ReceiveGlobalModelRequest(
+                client_id=client_id
+            )
 
-        response = stub.ReceiveGlobalModel(request)
+            # Send the model in chunks
+            chunk_size = 64 * 1024  # 64 KB
+            for i in range(0, len(global_model_bytes), chunk_size):
+                chunk = global_model_bytes[i:i+chunk_size]
+                yield ClientgRPC_pb2.ReceiveGlobalModelRequest(global_model=chunk)
+
+        # ---- Send the stream ----
+        response = stub.ReceiveGlobalModel(request_generator())
+
         print(f"✓ Sent global model to Client {client_id}")
+        return response
 
     
     def start_client_local_training(self, client_id, client_api_url):
@@ -428,21 +435,34 @@ class Server:
         print(f"✓ Started local training for Client {client_id}")
 
     def get_client_updates(self, client_id, client_api_url):
-        channel = grpc.insecure_channel(
-            client_api_url,
-            options=[
-                ('grpc.max_send_message_length', 500 * 1024 * 1024),
-                ('grpc.max_receive_message_length', 500 * 1024 * 1024),
-            ]
-        )
+        channel = grpc.insecure_channel(client_api_url)
         stub = ClientgRPC_pb2_grpc.ClientServiceStub(channel)
 
+        # Send request
         request = ClientgRPC_pb2.GetClientsTrainedModelRequest(
             client_id=client_id
         )
-        response = stub.GetClientsTrainedModel(request)
-        client_model = self.deserialize_state_dict(response.trained_model, map_location=self.device)
-        return client_model, response.training_time
+
+        # Initialize
+        client_model_bytes = b""
+        training_time = None
+
+        # Streamed response
+        for i, message in enumerate(stub.GetClientsTrainedModel(request)):
+            if i == 0:
+                # First packet contains training_time
+                training_time = message.training_time
+            
+            # Append model bytes
+            client_model_bytes += message.trained_model
+
+        # Now decode the final assembled model
+        client_state_dict = self.deserialize_state_dict(
+            client_model_bytes,
+            map_location=self.device
+        )
+        print(f"✓ Received trained model from Client {client_id}")
+        return client_state_dict, training_time
     
     def get_client_iid_measure(self, client_id, client_api_url):
         channel = grpc.insecure_channel(
@@ -459,6 +479,35 @@ class Server:
         )
         response = stub.GetIIDMeasure(request)
         return response.iid_measure
+    
+    def send_client_model_to_cal_val_acc(self, client_id, test_client_id, client_api_url, client_state_dict):
+        # Serialize model
+        client_model_bytes = self.serialize_state_dict(client_state_dict)
+        print(f"Serialized global model size (MB): {len(client_model_bytes)/1e6:.2f}")
+
+        # Prepare the GRPC client
+        channel = grpc.insecure_channel(client_api_url)
+        stub = ClientgRPC_pb2_grpc.ClientServiceStub(channel)
+
+        # ---- Generator for streaming data ----
+        def request_generator():
+            # First send metadata (client ID)
+            yield ClientgRPC_pb2.AccuracyBasedMeasureRequest(
+                client_id=test_client_id
+            )
+
+            # Send the model in chunks
+            chunk_size = 64 * 1024  # 64 KB
+            for i in range(0, len(client_model_bytes), chunk_size):
+                chunk = client_model_bytes[i:i+chunk_size]
+                yield ClientgRPC_pb2.AccuracyBasedMeasureRequest(model=chunk)
+
+        # ---- Send the stream (correct RPC method) ----
+        response = stub.AccuracyBasedMeasure(request_generator())
+
+        weighted_val_acc = response.weighted_val_acc
+        print(f"Client {client_id} received weighted val accuracy from Client {test_client_id}: {weighted_val_acc:.4f}")
+        return weighted_val_acc
 
     # ============================================================
     # Federated Learning Coordinator
@@ -502,7 +551,7 @@ class Server:
             print(f"Selected clients: {selected_clients}")
 
             for cid in selected_clients:
-                print(f"{'='*80}\nClient {cid} Local Training\n{'='*80}")
+                print(f"\n{'='*70}\nClient {cid} Local Training\n{'='*70}")
 
                 # Send global model to client
                 send_start_time = time.time()
@@ -532,31 +581,26 @@ class Server:
 
             # Accuracy Based Aggregation Weights
             acc_based_agg_weights = []
-            if self.fl_accuracy["selected_algorithm"] == "AccuracyBased" or self.fl_accuracy["selected_algorithm"] == "AccuracyBased(1-JSD)" or self.fl_accuracy["selected_algorithm"] == "AccuracyBased_SEBW":
+            if self.fl_accuracy["selected_algorithm"] == "AccuracyBased" or self.fl_accuracy["selected_algorithm"] == "AccuracyBased(1-JSD)" or self.fl_accuracy["selected_algorithm"] == "AccuracyBased_SEBW" or self.fl_accuracy["selected_algorithm"] == "CAFA":
                 print("Calculating Accuracy Based Aggregation Weights")
                 acc_based_agg_weights_cal_time = time.time()
                 for cid in selected_clients:
-                    test_client_model_params = self.clients["selected_clients_models"][cid]
+                    client_state_dict = self.clients["selected_clients_models"][cid]
+                    weighted_val_acc_list = []
                     for t_cid in selected_clients:
                         if cid == t_cid:
                             continue
-                        client_send_acc_based_measure_url = self.clients["client_api_urls"][cid] + "/send/acc-based-measure"
                         try:
-                            response = requests.get(
-                                client_send_acc_based_measure_url,
-                                json={
-                                    "client_model_params": test_client_model_params,
-                                    "model_type": self.fl_train_config["model_type"],
-                                },
-                                timeout=None
+                            weighted_val_acc = self.send_client_model_to_cal_val_acc(
+                                client_id = cid,
+                                test_client_id=t_cid,
+                                client_api_url=self.clients["client_api_urls"][t_cid],
+                                client_state_dict=client_state_dict
                             )
-                            response.raise_for_status()
-                            acc_based_measure_result = response.json()
-                            acc_based_agg_weights.append(acc_based_measure_result['acc_based_measure'])
-
-                            print(f"✓ Received Accuracy Based measure from Client {cid}")
+                            weighted_val_acc_list.append(weighted_val_acc)
                         except Exception as e:
-                            print(f"Failed to receive Accuracy Based measure from Client {cid}: {e}")
+                            raise e
+                    acc_based_agg_weights.append(np.mean(weighted_val_acc_list))
 
                 acc_based_agg_weights_cal_time = time.time() - acc_based_agg_weights_cal_time
             else:
