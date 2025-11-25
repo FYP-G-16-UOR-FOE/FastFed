@@ -75,10 +75,12 @@ class ClientServicer(ClientgRPC_pb2_grpc.ClientServiceServicer):
         try:
             client_id: int = None
             model_bytes: bytes = b""
+            model_type = None
             for i, message in enumerate(messages):
                 if i == 0 and client_id is None:
                     client_id = message.client_id
-                model_bytes += message.global_model
+                    model_type = message.model_type
+                model_bytes += message.model
             print(f"[ClientServicer] ReceiveGlobalModel for client {client_id}")
 
             state_dict = Serializer.deserialize_state_dict(model_bytes, map_location=self.client.device)

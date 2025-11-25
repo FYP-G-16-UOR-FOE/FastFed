@@ -481,7 +481,8 @@ class Server:
         def request_generator():
             # First send metadata (client ID)
             yield ClientgRPC_pb2.AccuracyBasedMeasureRequest(
-                client_id=test_client_id
+                client_id=test_client_id,
+                model_type=self.model_type
             )
 
             # Send the model in chunks
