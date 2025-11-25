@@ -573,8 +573,8 @@ class Server:
             if self.fl_accuracy["selected_algorithm"] == "AccuracyBased" or self.fl_accuracy["selected_algorithm"] == "AccuracyBased(1-JSD)" or self.fl_accuracy["selected_algorithm"] == "AccuracyBased_SEBW" or self.fl_accuracy["selected_algorithm"] == "CAFA":
                 print("Calculating Accuracy Based Aggregation Weights")
                 acc_based_agg_weights_cal_time = time.time()
-                for cid in selected_clients:
-                    client_state_dict = self.clients["selected_clients_models"][selected_clients.index(cid)]
+                for i, cid in enumerate(selected_clients):
+                    client_state_dict = self.clients["selected_clients_models"][i]
                     weighted_val_acc_list = []
                     for t_cid in selected_clients:
                         if cid == t_cid:
