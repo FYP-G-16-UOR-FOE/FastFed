@@ -574,7 +574,7 @@ class Server:
                 print("Calculating Accuracy Based Aggregation Weights")
                 acc_based_agg_weights_cal_time = time.time()
                 for cid in selected_clients:
-                    client_state_dict = self.clients["selected_clients_models"][cid]
+                    client_state_dict = self.clients["selected_clients_models"][selected_clients.index(cid)]
                     weighted_val_acc_list = []
                     for t_cid in selected_clients:
                         if cid == t_cid:
