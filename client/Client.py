@@ -86,7 +86,7 @@ class Client:
     def evaluate_model_on_validation_data(self, state_dict, model_type):
         model = copy.deepcopy(self.client_model)
         model.load_state_dict(state_dict, strict=True)
-        return self.get_weighted_val_accuracy(model = model, model_type=model_type)
+        return self.get_weighted_val_accuracy(client_model=model, model_type=model_type)
     
     def measure_iid_nature(self):
         iid_measure_method = self.get_iid_measure_method()

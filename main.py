@@ -7,6 +7,7 @@ from concurrent import futures
 
 import grpc
 import torch
+import torchvision
 
 import wandb
 from client.Client import Client
@@ -203,4 +204,5 @@ if __name__ == '__main__':
         "wandb_key": args.wandb_key,
         "seed": args.seed,
     }
+    torchvision.datasets.CIFAR10(root="./data", train=True, download=True)
     serve(config)
