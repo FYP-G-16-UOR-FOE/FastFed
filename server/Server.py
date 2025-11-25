@@ -259,7 +259,7 @@ class Server:
         elif self.fl_train_config["model_type"] == "NormalCNN":
             criterion = nn.CrossEntropyLoss()
         else:
-            raise ValueError(f"Invalid model type: {self.model_type}.")
+            raise ValueError(f"Invalid model type: {self.fl_train_config["model_type"]}.")
 
         with torch.no_grad():
             for images, labels in self.global_test_dataloader:
@@ -369,7 +369,7 @@ class Server:
 
                 get_weighted_val_acc_comm_data = {
                     "client_model": client_model,
-                    "model_type": self.model_type,
+                    "model_type": self.fl_train_config["model_type"],
                 }
                 client_weighted_val_accuracy = test_client.get_from_client(data=get_weighted_val_acc_comm_data, comm_type="GET_WEIGHTED_VALIDATION_ACCURACY")
                 client_weighted_val_accuracies.append(client_weighted_val_accuracy)
@@ -482,7 +482,7 @@ class Server:
             # First send metadata (client ID)
             yield ClientgRPC_pb2.AccuracyBasedMeasureRequest(
                 client_id=test_client_id,
-                model_type=self.model_type
+                model_type=self.fl_train_config["model_type"]
             )
 
             # Send the model in chunks
