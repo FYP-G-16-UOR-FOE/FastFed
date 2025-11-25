@@ -7,8 +7,8 @@ from concurrent import futures
 
 import grpc
 import torch
-import wandb
 
+import wandb
 from client.Client import Client
 from client.ClientServicer import ClientServicer
 from dataset_partitioner.DatasetPartitioner import DatasetPartitioner
@@ -35,7 +35,7 @@ def server_serve(config):
     def wait_until_clients_register(server, n):
         while len(server.clients["clients_ids"]) < n:
             print(f"[Server] Waiting for clients... {len(server.clients['clients_ids'])}/{n}")
-            time.sleep(1)
+            time.sleep(2.0)
 
     # Wait for client registrations
     wait_until_clients_register(servicer.server, config["num_clients"])

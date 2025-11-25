@@ -491,7 +491,7 @@ class Server:
                 yield ClientgRPC_pb2.AccuracyBasedMeasureRequest(model=chunk)
 
         # ---- Send the stream (correct RPC method) ----
-        response = stub.AccuracyBasedMeasure(request_generator())
+        response = stub.ReceiveModelForAccuracyBasedMeasure(request_generator())
 
         weighted_val_acc = response.weighted_val_acc
         print(f"Client {client_id} received weighted val accuracy from Client {test_client_id}: {weighted_val_acc:.4f}")
