@@ -84,7 +84,7 @@ class ClientServicer(ClientgRPC_pb2_grpc.ClientServiceServicer):
             print(f"[ClientServicer] ReceiveGlobalModel for client {client_id}")
 
             state_dict = Serializer.deserialize_state_dict(model_bytes, map_location=self.client.device)
-            weighted_val_acc = self.client.evaluate_state_dict_on_validation_data(state_dict)
+            weighted_val_acc = self.client.evaluate_model_on_validation_data(state_dict=state_dict, model_type=model_type)
             return ClientgRPC_pb2.AccuracyBasedMeasureResponse(weighted_val_acc=weighted_val_acc)
         except Exception as e:
             print("[Client] Error computing accuracy-based measure:", e, file=sys.stderr)
