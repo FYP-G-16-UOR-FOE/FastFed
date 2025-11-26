@@ -54,6 +54,11 @@ class ClientServiceStub(object):
                 request_serializer=gRPC_dot_ClientgRPC__pb2.GetIIDMeasureRequest.SerializeToString,
                 response_deserializer=gRPC_dot_ClientgRPC__pb2.GetIIDMeasureResponse.FromString,
                 _registered_method=True)
+        self.GetClassificationIIDMeasure = channel.unary_unary(
+                '/fl_client.ClientService/GetClassificationIIDMeasure',
+                request_serializer=gRPC_dot_ClientgRPC__pb2.GetClassificationIIDMeasureRequest.SerializeToString,
+                response_deserializer=gRPC_dot_ClientgRPC__pb2.GetClassificationIIDMeasureResponse.FromString,
+                _registered_method=True)
         self.ReceiveModelForAccuracyBasedMeasure = channel.stream_unary(
                 '/fl_client.ClientService/ReceiveModelForAccuracyBasedMeasure',
                 request_serializer=gRPC_dot_ClientgRPC__pb2.AccuracyBasedMeasureRequest.SerializeToString,
@@ -92,8 +97,15 @@ class ClientServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetClassificationIIDMeasure(self, request, context):
+        """5. Get IID measure
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def ReceiveModelForAccuracyBasedMeasure(self, request_iterator, context):
-        """5. Receive model for accuracy-based measurement
+        """6. Receive model for accuracy-based measurement
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -121,6 +133,11 @@ def add_ClientServiceServicer_to_server(servicer, server):
                     servicer.GetIIDMeasure,
                     request_deserializer=gRPC_dot_ClientgRPC__pb2.GetIIDMeasureRequest.FromString,
                     response_serializer=gRPC_dot_ClientgRPC__pb2.GetIIDMeasureResponse.SerializeToString,
+            ),
+            'GetClassificationIIDMeasure': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetClassificationIIDMeasure,
+                    request_deserializer=gRPC_dot_ClientgRPC__pb2.GetClassificationIIDMeasureRequest.FromString,
+                    response_serializer=gRPC_dot_ClientgRPC__pb2.GetClassificationIIDMeasureResponse.SerializeToString,
             ),
             'ReceiveModelForAccuracyBasedMeasure': grpc.stream_unary_rpc_method_handler(
                     servicer.ReceiveModelForAccuracyBasedMeasure,
@@ -236,6 +253,33 @@ class ClientService(object):
             '/fl_client.ClientService/GetIIDMeasure',
             gRPC_dot_ClientgRPC__pb2.GetIIDMeasureRequest.SerializeToString,
             gRPC_dot_ClientgRPC__pb2.GetIIDMeasureResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetClassificationIIDMeasure(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/fl_client.ClientService/GetClassificationIIDMeasure',
+            gRPC_dot_ClientgRPC__pb2.GetClassificationIIDMeasureRequest.SerializeToString,
+            gRPC_dot_ClientgRPC__pb2.GetClassificationIIDMeasureResponse.FromString,
             options,
             channel_credentials,
             insecure,

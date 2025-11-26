@@ -466,6 +466,16 @@ class Server:
         response = stub.GetIIDMeasure(request)
         return response.iid_measure
     
+    def get_client_classification_iid_measure(self, client_id, client_api_url):
+        channel = grpc.insecure_channel(client_api_url)
+        stub = ClientgRPC_pb2_grpc.ClientServiceStub(channel)
+
+        request = ClientgRPC_pb2.GetClassificationIIDMeasureRequest(
+            client_id=client_id
+        )
+        response = stub.GetClassificationIIDMeasure(request)
+        return response.dataset_distribution
+    
     def send_client_model_to_cal_val_acc(self, client_id, test_client_id, client_api_url, client_state_dict):
         # Serialize model
         client_model_bytes = self.serialize_state_dict(client_state_dict)
@@ -520,18 +530,18 @@ class Server:
             self.history["total_iid_agg_weights_cal_time"] = iid_agg_weights_cal_time
             print("IID Aggregation Weights: ", iid_agg_weights)
         elif self.fl_accuracy["selected_algorithm"] == "CAFA":
-            print("\nGetting CAFA Clarification IID Measures from selected clients...")
+            print("\nGetting CAFA Classification IID Measures from selected clients...")
             iid_agg_weights_cal_time = time.time()
             iid_agg_weights = []
             clients_label_distribution = []
             for cid in self.clients["clients_ids"]:
-                label_distribution = self.get_client_iid_measure(cid, self.clients["client_api_urls"][cid])
+                label_distribution = self.get_client_classification_iid_measure(cid, self.clients["client_api_urls"][cid])
                 clients_label_distribution.append(label_distribution)
             iid_agg_weights = self.get_clients_classification_agg_weights(clients_label_distribution)
             iid_agg_weights_cal_time = time.time() - iid_agg_weights_cal_time
             self.history["total_iid_agg_weights_cal_time"] = iid_agg_weights_cal_time
             print("Clients Label Distribution: ", clients_label_distribution)
-            print("Clarification IID Aggregation Weights: ", self.format_list_4dp(iid_agg_weights))
+            print("Classification IID Aggregation Weights: ", self.format_list_4dp(iid_agg_weights))
         else:
             iid_agg_weights = None
 

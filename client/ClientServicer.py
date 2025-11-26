@@ -70,6 +70,19 @@ class ClientServicer(ClientgRPC_pb2_grpc.ClientServiceServicer):
         except Exception as e:
             print("[Client] Error calculating IID measure:", e, file=sys.stderr)
             raise e
+        
+    def GetClassificationIIDMeasure(self, request, context):
+        client_id = request.client_id
+        print(f"[ClientServicer] GetClassificationIIDMeasure for client {client_id}")
+        try:
+            client_distribution = self.client.calculate_label_distribution()
+            return ClientgRPC_pb2.GetClassificationIIDMeasureResponse(
+                client_id=client_id,
+                dataset_distribution=client_distribution
+            )
+        except Exception as e:
+            print("[Client] Error calculating IID measure:", e, file=sys.stderr)
+            raise e
 
     def ReceiveModelForAccuracyBasedMeasure(self, messages, context):
         try:

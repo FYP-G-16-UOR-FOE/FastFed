@@ -15,7 +15,10 @@ service ClientService {
   // 4. Get IID measure
   rpc GetIIDMeasure(GetIIDMeasureRequest) returns (GetIIDMeasureResponse);
 
-  // 5. Receive model for accuracy-based measurement
+  // 5. Get IID measure
+  rpc GetClassificationIIDMeasure(GetClassificationIIDMeasureRequest) returns (GetClassificationIIDMeasureResponse);
+
+  // 6. Receive model for accuracy-based measurement
   rpc ReceiveModelForAccuracyBasedMeasure(stream AccuracyBasedMeasureRequest) returns (AccuracyBasedMeasureResponse);
 }
 
@@ -47,6 +50,15 @@ message GetIIDMeasureRequest {
 message GetIIDMeasureResponse {
   int32 client_id = 1;
   float iid_measure = 2;
+}
+
+message GetClassificationIIDMeasureRequest {
+  int32 client_id = 1;
+}
+
+message GetClassificationIIDMeasureResponse {
+  int32 client_id = 1;
+  map<int32, float> dataset_distribution = 2;
 }
 
 message GetClientsTrainedModelRequest {
