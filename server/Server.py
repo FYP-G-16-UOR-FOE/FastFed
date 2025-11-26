@@ -5,6 +5,7 @@ import os
 import pickle
 import time
 from collections import Counter
+from typing import Any, List
 
 import grpc
 import matplotlib.pyplot as plt
@@ -286,19 +287,16 @@ class Server:
             print(f"k={k}, silhouette score={score:.4f}")
         return silhouette_scores
 
-    def get_clients_classification_agg_weights(self, clients):
+    def get_clients_classification_agg_weights(self, clients_dataset_distributions):
         """
         Determine the optimal number of client clusters (k) using silhouette score.
         """
 
-        client_dicts = [
-            client.get_from_client(data={'agg_weight_type': "cafa"}, comm_type="GET_AGG_WEIGHT")
-            for client in clients
-        ]
+        client_dicts = clients_dataset_distributions
         keys = sorted(client_dicts[0].keys())
         distribution_matrix = np.array([[d[k] for k in keys] for d in client_dicts], dtype=float)
 
-        k_range = range(2, len(clients))  # test from 2 to N-1
+        k_range = range(2, len(clients_dataset_distributions))  # test from 2 to N-1
         silhouette_scores = self.evaluate_kmeans_silhouette(distribution_matrix, k_range)
 
         # Plot results
@@ -497,6 +495,10 @@ class Server:
         weighted_val_acc = response.weighted_val_acc
         print(f"Client {client_id} received weighted val accuracy from Client {test_client_id}: {weighted_val_acc:.4f}")
         return weighted_val_acc
+    
+    def format_list_4dp(self, data_list: List[Any]) -> str:
+        formatted_items = [f"{float(x):.4f}" for x in data_list]
+        return f"[{', '.join(formatted_items)}]"
 
     # ============================================================
     # Federated Learning Coordinator
@@ -517,6 +519,19 @@ class Server:
             iid_agg_weights_cal_time = time.time() - iid_agg_weights_cal_time
             self.history["total_iid_agg_weights_cal_time"] = iid_agg_weights_cal_time
             print("IID Aggregation Weights: ", iid_agg_weights)
+        elif self.fl_accuracy["selected_algorithm"] == "CAFA":
+            print("\nGetting CAFA Clarification IID Measures from selected clients...")
+            iid_agg_weights_cal_time = time.time()
+            iid_agg_weights = []
+            clients_label_distribution = []
+            for cid in self.clients["clients_ids"]:
+                label_distribution = self.get_client_iid_measure(cid, self.clients["client_api_urls"][cid])
+                clients_label_distribution.append(label_distribution)
+            iid_agg_weights = self.get_clients_classification_agg_weights(clients_label_distribution)
+            iid_agg_weights_cal_time = time.time() - iid_agg_weights_cal_time
+            self.history["total_iid_agg_weights_cal_time"] = iid_agg_weights_cal_time
+            print("Clients Label Distribution: ", clients_label_distribution)
+            print("Clarification IID Aggregation Weights: ", self.format_list_4dp(iid_agg_weights))
         else:
             iid_agg_weights = None
 
@@ -600,18 +615,30 @@ class Server:
                         
             # Get Aggregation Weights
             if iid_agg_weights and acc_based_agg_weights:
-                print("IID Measure Weights: ", iid_agg_weights)
-                print("Accuracy Based Weight: ", acc_based_agg_weights)
-                client_agg_weights = [
-                    iid_agg_weights[cid] * acc_based_agg_weights[i] for i, cid in enumerate(selected_clients)
+                # 1. Extract IID weights for the selected clients
+                selected_client_iid_weights = [
+                    iid_agg_weights[cid] for cid in selected_clients
                 ]
-                print("Combined Weights: ", client_agg_weights)
+                client_agg_weights = [
+                    iid * acc 
+                    for iid, acc in zip(selected_client_iid_weights, acc_based_agg_weights)
+                ]
+                print(f"--- Client Aggregation Weights Report ---")
+                print("\nIID Measure Weights: ", self.format_list_4dp(selected_client_iid_weights))
+                print("\nAccuracy Based Weights: ", self.format_list_4dp(acc_based_agg_weights))
+                print("\nCombined Weights (IID * Accuracy): ", self.format_list_4dp(client_agg_weights))
+                print("-----------------------------------------")
             elif iid_agg_weights:
                 client_agg_weights = [iid_agg_weights[cid] for cid in selected_clients]
-                print("IID Measure Weights: ", client_agg_weights)
+                print(f"--- Client Aggregation Weights Report ---")
+                print("\nIID Measure Weights: ", self.format_list_4dp(client_agg_weights))
+                print("-----------------------------------------")
             elif acc_based_agg_weights:
                 print("Accuracy Based Weight: ", acc_based_agg_weights)
                 client_agg_weights = [acc_based_agg_weights[i] for i in range(len(selected_clients))]
+                print(f"--- Client Aggregation Weights Report ---")
+                print("\nAccuracy Based Weights: ", self.format_list_4dp(client_agg_weights))
+                print("-----------------------------------------")
             else:
                 client_agg_weights = None
 

@@ -60,8 +60,9 @@ def server_serve(config):
     )
 
     # Start FL loop
-    fl_thread = threading.Thread(target=servicer.server.start_federated_learning, daemon=True)
-    fl_thread.start()
+    #fl_thread = threading.Thread(target=servicer.server.start_federated_learning, daemon=True)
+    #fl_thread.start()
+    servicer.server.start_federated_learning()
     print("[Server] Federated learning loop started in background thread")
 
     try:
@@ -170,7 +171,7 @@ def serve(config):
 
     p_server.start()
     # small sleep to increase chance server is listening before clients attempt registration
-    time.sleep(2.0)
+    time.sleep(10.0)
     p_client.start()
 
     try:

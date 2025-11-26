@@ -96,6 +96,8 @@ class Client:
             iid_measure = float(self.get_agg_weight_jsd())
         elif iid_measure_method == "SEBW":
             iid_measure = float(self.get_shannon_entropy_weight_metric())
+        elif iid_measure_method == "CAFA":
+            iid_measure = self.calculate_label_distribution()
         else:
             iid_measure = None
 
@@ -109,6 +111,8 @@ class Client:
             return "JSD"
         elif algorithm in ["SEBW", "AccuracyBased_SEBW"]:
             return "SEBW"
+        elif algorithm == "CAFA":
+            return "CAFA"
         else:
             return None
         
