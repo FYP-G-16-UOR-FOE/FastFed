@@ -537,7 +537,8 @@ class Server:
             for cid in self.clients["clients_ids"]:
                 label_distribution = self.get_client_classification_iid_measure(cid, self.clients["client_api_urls"][cid])
                 clients_label_distribution.append(label_distribution)
-            iid_agg_weights = self.get_clients_classification_agg_weights(clients_label_distribution)
+            classification_iid_agg_weights = self.get_clients_classification_agg_weights(clients_label_distribution)
+            iid_agg_weights = [ x for x in classification_iid_agg_weights]
             iid_agg_weights_cal_time = time.time() - iid_agg_weights_cal_time
             self.history["total_iid_agg_weights_cal_time"] = iid_agg_weights_cal_time
             print("Clients Label Distribution: ", clients_label_distribution)
