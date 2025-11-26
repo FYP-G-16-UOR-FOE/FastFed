@@ -634,22 +634,22 @@ class Server:
                     iid * acc 
                     for iid, acc in zip(selected_client_iid_weights, acc_based_agg_weights)
                 ]
-                print(f"--- Client Aggregation Weights Report ---")
-                print("\nIID Measure Weights: ", self.format_list_4dp(selected_client_iid_weights))
-                print("\nAccuracy Based Weights: ", self.format_list_4dp(acc_based_agg_weights))
-                print("\nCombined Weights (IID * Accuracy): ", self.format_list_4dp(client_agg_weights))
-                print("-----------------------------------------")
+                print(f"\n----------------- Client Aggregation Weights Report --------------------")
+                print("IID Measure Weights: ", self.format_list_4dp(selected_client_iid_weights))
+                print("Accuracy Based Weights: ", self.format_list_4dp(acc_based_agg_weights))
+                print("Combined Weights (IID * Accuracy): ", self.format_list_4dp(client_agg_weights))
+                print("-----------------------------------------------------------------------------------")
             elif iid_agg_weights:
                 client_agg_weights = [iid_agg_weights[cid] for cid in selected_clients]
-                print(f"--- Client Aggregation Weights Report ---")
-                print("\nIID Measure Weights: ", self.format_list_4dp(client_agg_weights))
-                print("-----------------------------------------")
+                print(f"\n----------------- Client Aggregation Weights Report --------------------")
+                print("IID Measure Weights: ", self.format_list_4dp(client_agg_weights))
+                print("-----------------------------------------------------------------------------------")
             elif acc_based_agg_weights:
                 print("Accuracy Based Weight: ", acc_based_agg_weights)
                 client_agg_weights = [acc_based_agg_weights[i] for i in range(len(selected_clients))]
-                print(f"--- Client Aggregation Weights Report ---")
-                print("\nAccuracy Based Weights: ", self.format_list_4dp(client_agg_weights))
-                print("-----------------------------------------")
+                print(f"\n----------------- Client Aggregation Weights Report --------------------")
+                print("Accuracy Based Weights: ", self.format_list_4dp(client_agg_weights))
+                print("-----------------------------------------------------------------------------------")
             else:
                 client_agg_weights = None
 
