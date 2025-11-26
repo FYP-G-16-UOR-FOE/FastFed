@@ -11,17 +11,16 @@ import grpc
 import matplotlib.pyplot as plt
 import numpy as np
 import psutil
-import requests
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
+import wandb
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-import wandb
 from gRPC import ClientgRPC_pb2, ClientgRPC_pb2_grpc
 
 torch.backends.cudnn.benchmark = True
@@ -545,6 +544,7 @@ class Server:
             print("Classification IID Aggregation Weights: ", self.format_list_4dp(iid_agg_weights))
         else:
             iid_agg_weights = None
+            iid_agg_weights_cal_time = 0.0
 
         # Federated Learning Rounds
         for fl_round in range(self.fl_train_config["fl_rounds"]):
@@ -671,10 +671,13 @@ class Server:
             self.history["system_usage"].append(system_usage)
 
             print(f"\n=============== Round {fl_round + 1} Summary ===============")
-            print(f"Round {fl_round+1}: Global Model: Accuracy={acc:.2f}%, Loss={loss:.4f}")
-            print(f"Round {fl_round+1}: FL Round Total Time={round_time:.2f} seconds")
-            print(f"Round {fl_round+1}: Total Clients Training Time={round_local_train_time:.2f} seconds")
-            print(f"Round {fl_round+1}: Round Communication Time={self.history['round_communication_time'][-1]:.2f} seconds")
+            print(f"Global Model: Accuracy={acc:.2f}%, Loss={loss:.4f}")
+            print(f"IID Agg Weight Measure Time={iid_agg_weights_cal_time} seconds")
+            print(f"Total Clients Training Time={round_local_train_time:.2f} seconds")
+            print(f"Accuracy Based Agg Weight Measure Time={acc_based_agg_weights_cal_time} seconds")
+            print(f"Round Communication Time={self.history['round_communication_time'][-1]:.2f} seconds")
+            print(f"Aggregation Time={agg_time} seconds")
+            print(f"FL Round Total Time={round_time:.2f} seconds")
             print("===============================================================")
 
             # Log to WANDB

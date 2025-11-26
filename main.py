@@ -8,8 +8,8 @@ from concurrent import futures
 import grpc
 import torch
 import torchvision
-
 import wandb
+
 from client.Client import Client
 from client.ClientServicer import ClientServicer
 from dataset_partitioner.DatasetPartitioner import DatasetPartitioner
@@ -60,10 +60,8 @@ def server_serve(config):
     )
 
     # Start FL loop
-    #fl_thread = threading.Thread(target=servicer.server.start_federated_learning, daemon=True)
-    #fl_thread.start()
     servicer.server.start_federated_learning()
-    print("[Server] Federated learning loop started in background thread")
+    print("[Server] Federated learning loop started")
 
     try:
         grpc_server.wait_for_termination()
@@ -205,5 +203,4 @@ if __name__ == '__main__':
         "wandb_key": args.wandb_key,
         "seed": args.seed,
     }
-    torchvision.datasets.CIFAR10(root="./data", train=True, download=True)
     serve(config)
