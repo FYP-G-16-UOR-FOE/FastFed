@@ -1,8 +1,8 @@
 import sys
-from typing import List
 
 from client.Client import Client
 from gRPC import ClientgRPC_pb2, ClientgRPC_pb2_grpc
+from performance.Performance import Performance
 from utils.Serializer import Serializer
 
 
@@ -20,7 +20,10 @@ class ClientServicer(ClientgRPC_pb2_grpc.ClientServiceServicer):
                 model_bytes += message.global_model
             print(f"[ClientServicer] ReceiveGlobalModel for client {client_id}")
 
-            state_dict = Serializer.deserialize_state_dict(model_bytes, map_location=self.client.device)
+            state_dict = Serializer.deserialize(model_bytes)
+            if self.client.fl_performance["is_use_quantization"]:
+                state_dict = Performance.dequantize_model_parameters(state_dict)
+
             self.client.receive_global_model(state_dict)
             return ClientgRPC_pb2.StatusResponse(status="OK")
         except Exception as e:
@@ -41,7 +44,10 @@ class ClientServicer(ClientgRPC_pb2_grpc.ClientServiceServicer):
         client_id = request.client_id
         try:
             client_model_params, training_time = self.client.get_client_updates()
-            model_bytes = Serializer.serialize_state_dict(client_model_params)
+            if self.client.fl_performance["is_use_quantization"]:
+                client_model_params = Performance.quantize_model_parameters(client_model_params)
+
+            model_bytes = Serializer.serialize(client_model_params)
 
             yield ClientgRPC_pb2.GetClientsTrainedModelResponse(
                 client_id=client_id,
@@ -96,7 +102,11 @@ class ClientServicer(ClientgRPC_pb2_grpc.ClientServiceServicer):
                 model_bytes += message.model
             print(f"[ClientServicer] ReceiveGlobalModel for client {client_id}")
 
-            state_dict = Serializer.deserialize_state_dict(model_bytes, map_location=self.client.device)
+            state_dict = Serializer.deserialize(model_bytes)
+
+            if self.client.fl_performance["is_use_quantization"]:
+                state_dict = Performance.dequantize_model_parameters(state_dict)
+
             weighted_val_acc = self.client.evaluate_model_on_validation_data(state_dict=state_dict, model_type=model_type)
             return ClientgRPC_pb2.AccuracyBasedMeasureResponse(weighted_val_acc=weighted_val_acc)
         except Exception as e:

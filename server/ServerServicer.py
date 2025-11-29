@@ -24,6 +24,7 @@ class ServerServicer(ServergRPC_pb2_grpc.ServerServiceServicer):
             num_selected_clients=config["num_selected_clients"],
             results_save_dir=config["results_dir"],
             selected_algorithm=config["algorithm"],
+            is_use_quantization=config["is_use_quantization"],
         )
 
     def RegisterClient(self, request, context):

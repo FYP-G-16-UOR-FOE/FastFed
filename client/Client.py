@@ -19,7 +19,7 @@ class Client:
     def __init__(
             self, id, ip_address, port, device, model, client_dataset, batch_size,
             selected_algorithm, is_use_full_dataset, model_type,
-            local_epochs, fedprox_mu
+            local_epochs, fedprox_mu, is_use_quantization
     ):
         """
         Initialize the client with dataset splits and dataloaders.
@@ -52,6 +52,9 @@ class Client:
             "mu": fedprox_mu
         }
         self.iid_measure = None
+        self.fl_performance ={
+            "is_use_quantization": is_use_quantization
+        }
 
         full_dataset = client_dataset
 
@@ -105,7 +108,7 @@ class Client:
 
     def get_iid_measure_method(self):
         algorithm = self.client_train_config.get("selected_algorithm", None)
-        if algorithm in ["(1-JSD)", "AccuracyBased(1-JSD)"]:
+        if algorithm in ["(1-JSD)", "AccuracyBased(1-JSD)", "ClientSize(1-JSD)"]:
             return "JSD"
         elif algorithm in ["SEBW", "AccuracyBased_SEBW"]:
             return "SEBW"

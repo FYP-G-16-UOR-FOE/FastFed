@@ -1,15 +1,13 @@
 import copy
 import multiprocessing
 import sys
-import threading
 import time
 from concurrent import futures
 
 import grpc
 import torch
-import torchvision
-import wandb
 
+import wandb
 from client.Client import Client
 from client.ClientServicer import ClientServicer
 from dataset_partitioner.DatasetPartitioner import DatasetPartitioner
@@ -105,6 +103,7 @@ def client_serve(config):
             model_type=config["model"],
             local_epochs=config["local_epochs"],
             fedprox_mu=config["fedprox_mu"],
+            is_use_quantization=config["is_use_quantization"],
         )
         clients.append(c)
 
@@ -202,5 +201,6 @@ if __name__ == '__main__':
         "wandb_project": args.wandb_project,
         "wandb_key": args.wandb_key,
         "seed": args.seed,
+        "is_use_quantization": args.is_use_quantization,
     }
     serve(config)

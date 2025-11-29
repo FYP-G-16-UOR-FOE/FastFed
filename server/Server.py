@@ -15,18 +15,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
-import wandb
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
+import wandb
 from gRPC import ClientgRPC_pb2, ClientgRPC_pb2_grpc
+from performance.Performance import Performance
+from utils.Serializer import Serializer
 
 torch.backends.cudnn.benchmark = True
 
 class Server:
-    def __init__(self, device, global_model, model_type, fl_rounds, num_clients, num_selected_clients, local_epochs, selected_algorithm, results_save_dir):
+    def __init__(self, device, global_model, model_type, fl_rounds, num_clients, num_selected_clients, local_epochs, selected_algorithm, is_use_quantization, results_save_dir):
         """
         Server class for Federated Learning aggregation and coordination.
         """
@@ -52,9 +54,9 @@ class Server:
             "iid_agg_weights": [],
             "accuracy_based_agg_weights": [],
         }
-        self.fl_security = {}
+        self.fl_security = {} # Add security parameters
         self.fl_performance ={
-            "selected_performance_optimization_types": []
+            "is_use_quantization": is_use_quantization
         }
         self.history = {
             "global_accuracy": [],
@@ -79,68 +81,15 @@ class Server:
             transforms.Normalize((0.4914, 0.4822, 0.4465),
                                  (0.2023, 0.1994, 0.2010))
         ])
-        global_test_dataset = torchvision.datasets.CIFAR10(
-            root='./data', train=False, download=True, transform=transform)
+        global_test_dataset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
         self.global_test_dataloader = DataLoader(global_test_dataset, batch_size=100)
-
-    def register_client(self, client_id: int, client_api_url: str):
-        if client_id in self.clients["clients_ids"]:
-            print(f"Client ID {client_id} is already registered.")
-            return
-        print(f"Registering Client ID: {client_id}")
-        self.clients["clients_ids"].append(client_id)
-        self.clients["client_api_urls"].append(client_api_url)
-
-    def receive_client_updates(self, client_id: int, client_model: dict, training_time: float, iid_measure: float):
-        print(f"Receiving updates from Client ID: {client_id}")
-        deserialized_model = self.deserialize_model(client_model)
-        self.clients["selected_clients_models"].append(deserialized_model)
-        self.history["round_local_training_time"][-1] += training_time
-        self.fl_accuracy["iid_agg_weights"].append(iid_measure)
         
     # ============================================================
     # 🔹 Core Server Functions
     # ============================================================
     def get_global_model_params(self):
-        """Return global model parameters."""
         return self.global_model.state_dict()
-    
-    def serialize_model(self, model):
-        """
-        Convert a PyTorch model's state_dict into a JSON-serializable dictionary.
-        Tensors are converted to CPU NumPy arrays, then to Python lists.
-        """
-        state_dict = model.state_dict()
-        serialized = {
-            k: (v.detach().cpu().numpy().tolist() if isinstance(v, torch.Tensor) else v)
-            for k, v in state_dict.items()
-        }
-        return serialized
-    
-    def deserialize_model(self, serialized_state):
-        """
-        Convert a JSON-serializable model dictionary back into a PyTorch state_dict.
-        Lists → Tensors
-        Scalars → Tensors
-        """
-        deserialized_state = {}
 
-        for k, v in serialized_state.items():
-            # Case 1: list (weights/bias tensors)
-            if isinstance(v, list):
-                deserialized_state[k] = torch.tensor(v)
-
-            # Case 2: scalar numpy values that were converted using .item()
-            elif isinstance(v, (int, float)):
-                deserialized_state[k] = torch.tensor(v)
-
-            # Case 3: fallback (should not happen normally)
-            else:
-                deserialized_state[k] = torch.tensor(v)
-
-        return deserialized_state
-
-    
     def cal_size(self, obj):
         """Calculate the size of a Python object in bytes."""
         return len(pickle.dumps(obj))
@@ -324,7 +273,10 @@ class Server:
         ])
 
         return clients_clus_agg_weights
-
+    
+    # ----------------------------------------------------------
+    # Utils
+    # ---------------------------------------------------------- 
     def get_system_usage(self, device):
         usage = {
             "cpu_percent": psutil.cpu_percent(),
@@ -350,45 +302,28 @@ class Server:
 
         print(f"✅ All result saved successfully.")
 
+    def format_list_4dp(self, data_list: List[Any]) -> str:
+        formatted_items = [f"{float(x):.4f}" for x in data_list]
+        return f"[{', '.join(formatted_items)}]"
 
-    def get_avg_val_accuracy_based_agg_weights(self, selected_clients_models, selected_clients):
-        """
-        Calculate accuracy-based aggregation weights.
-        """
-        accuracy_based_agg_weights = []
-        for i in range(len(selected_clients)):
-            client_model = selected_clients_models[i]
-            client_weighted_val_accuracies = []
-            for j in range(len(selected_clients)):
-                if i == j:
-                    continue
-                test_client = selected_clients[j]
-
-                get_weighted_val_acc_comm_data = {
-                    "client_model": client_model,
-                    "model_type": self.fl_train_config["model_type"],
-                }
-                client_weighted_val_accuracy = test_client.get_from_client(data=get_weighted_val_acc_comm_data, comm_type="GET_WEIGHTED_VALIDATION_ACCURACY")
-                client_weighted_val_accuracies.append(client_weighted_val_accuracy)
-            average_client_weighted_val_accuracy = np.mean(client_weighted_val_accuracies)
-            accuracy_based_agg_weights.append(average_client_weighted_val_accuracy)
-
-        return accuracy_based_agg_weights
     
-    def serialize_state_dict(self, state_dict) -> bytes:
-        buf = io.BytesIO()
-        # save CPU tensors to avoid CUDA device issues during load
-        cpu_state = {k: v.cpu() for k, v in state_dict.items()}
-        torch.save(cpu_state, buf)
-        return buf.getvalue()
-
-    def deserialize_state_dict(self, b: bytes, map_location=None):
-        buf = io.BytesIO(b)
-        return torch.load(buf, map_location=map_location)
-    
+    # ----------------------------------------------------------
+    # Server -> Client Communication
+    # ----------------------------------------------------------  
+    def register_client(self, client_id: int, client_api_url: str):
+        if client_id in self.clients["clients_ids"]:
+            print(f"Client ID {client_id} is already registered.")
+            return
+        print(f"Registering Client ID: {client_id}")
+        self.clients["clients_ids"].append(client_id)
+        self.clients["client_api_urls"].append(client_api_url)
+        
     def send_global_model_to_client(self, client_id, client_api_url, global_state_dict):
         # Serialize model
-        global_model_bytes = self.serialize_state_dict(global_state_dict)
+        if self.fl_performance["is_use_quantization"]:
+            global_state_dict = Performance.quantize_model_parameters(global_state_dict)
+
+        global_model_bytes = Serializer.serialize(global_state_dict)
         print(f"Serialized global model size (MB): {len(global_model_bytes)/1e6:.2f}")
 
         # Prepare the GRPC client
@@ -429,29 +364,24 @@ class Server:
         channel = grpc.insecure_channel(client_api_url)
         stub = ClientgRPC_pb2_grpc.ClientServiceStub(channel)
 
-        # Send request
         request = ClientgRPC_pb2.GetClientsTrainedModelRequest(
             client_id=client_id
         )
 
-        # Initialize
         client_model_bytes = b""
         training_time = None
 
-        # Streamed response
         for i, message in enumerate(stub.GetClientsTrainedModel(request)):
             if i == 0:
-                # First packet contains training_time
                 training_time = message.training_time
             
-            # Append model bytes
             client_model_bytes += message.trained_model
 
-        # Now decode the final assembled model
-        client_state_dict = self.deserialize_state_dict(
-            client_model_bytes,
-            map_location=self.device
-        )
+        client_state_dict = Serializer.deserialize(client_model_bytes)
+        
+        if self.fl_performance["is_use_quantization"]:
+            client_state_dict = Performance.dequantize_model_parameters(client_state_dict)
+
         print(f"✓ Received trained model from Client {client_id}")
         return client_state_dict, training_time
     
@@ -476,8 +406,12 @@ class Server:
         return response.dataset_distribution
     
     def send_client_model_to_cal_val_acc(self, client_id, test_client_id, client_api_url, client_state_dict):
+        
+        if self.fl_performance["is_use_quantization"]:
+            client_state_dict = Performance.quantize_model_parameters(client_state_dict)
+        
         # Serialize model
-        client_model_bytes = self.serialize_state_dict(client_state_dict)
+        client_model_bytes = Serializer.serialize(client_state_dict)
         print(f"Serialized global model size (MB): {len(client_model_bytes)/1e6:.2f}")
 
         # Prepare the GRPC client
@@ -505,9 +439,6 @@ class Server:
         print(f"Client {client_id} received weighted val accuracy from Client {test_client_id}: {weighted_val_acc:.4f}")
         return weighted_val_acc
     
-    def format_list_4dp(self, data_list: List[Any]) -> str:
-        formatted_items = [f"{float(x):.4f}" for x in data_list]
-        return f"[{', '.join(formatted_items)}]"
 
     # ============================================================
     # Federated Learning Coordinator

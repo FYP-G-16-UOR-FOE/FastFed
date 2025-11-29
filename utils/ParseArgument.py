@@ -25,6 +25,8 @@ class ParseArgument:
     RESULTS_DIR = os.path.join(RESULTS_SAVE_PATH, "FL_Results")
     
     BATCH_SIZE = 64
+
+    IS_USE_QUANTIZATION = True
     
     SERVER_HOST = 'localhost'
     SERVER_PORT = 50051
@@ -78,5 +80,6 @@ class ParseArgument:
         parser.add_argument("--wandb-project", type=str, default=cls.WANDB_PROJECT, help="W&B project name")
         parser.add_argument("--wandb-key", type=str, default=cls.WANDB_KEY, help="W&B API key")
         parser.add_argument("--seed", type=int, default=cls.SEED, help="Random seed")
+        parser.add_argument("--is-use-quantization", action="store_true", default=cls.IS_USE_QUANTIZATION, help="Is use Quantization")
 
         return parser.parse_args()
